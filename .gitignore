@@ -232,8 +232,10 @@ git_log.txt
 /logs/test_debugpage_tail.txt
 /logs/test_rhino_solo_tail.txt
 
-# === 品牌词合规清理（brand-name-sanitization v2，2026-09-15）：文档/测试/技能全部远端剥离，仅保留本地副本 ===
-/docs/
+# 上游本地文档/测试/技能默认不跟踪；本项目听书文档按文件精确放行
+/docs/*
+!/docs/AI_AUDIOBOOK_ARCHITECTURE.md
+!/docs/AI_AUDIOBOOK_PROGRESS.md
 /ai_tests/
 /.trae/skills/
 /app/src/test/java/io/legado/app/help/source/BookSourceVideoIdentityTest.kt
