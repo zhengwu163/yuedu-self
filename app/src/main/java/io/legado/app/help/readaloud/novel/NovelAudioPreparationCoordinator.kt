@@ -224,39 +224,51 @@ object NovelAudioPreparationCoordinator {
                 synthesize = client::synthesize,
                 decoder = decoder
             )
-            val plan = producer.produce(
-                snapshot = entry.snapshot,
-                scope = NovelAudioIdentity.serverScope(credentials.baseUrl),
-                generation = entry.generation,
-                existingCharacters = existingCharacters,
-                existingBindings = existingBindings,
-                retention = currentRequest.retention,
-                isCurrent = {
-                    lifecycle.isCurrent(run) {
-                        isCurrent() && isRequestCurrent(currentRequest)
-                    }
+            // 单章准备顺序只有一份实现，当前章与 AUTO 后续章共用，避免各自演化。
+            val preparer = NovelAudioChapterPreparer(
+                produce = { snapshot, generation, retention, isPlanCurrent ->
+                    producer.produce(
+                        snapshot = snapshot,
+                        scope = NovelAudioIdentity.serverScope(credentials.baseUrl),
+                        generation = generation,
+                        existingCharacters = existingCharacters,
+                        existingBindings = existingBindings,
+                        retention = retention,
+                        isCurrent = isPlanCurrent
+                    )
+                },
+                execution = { execution },
+                download = { token, isAutoAllowed ->
+                    downloadCoordinator.downloadPlan(
+                        execution = token,
+                        isAutoAllowed = isAutoAllowed
+                    )
                 }
-            ) ?: return@runBlock null
+            )
             when (
-                val result = downloadCoordinator.downloadPlan(
-                    execution = execution ?: return@runBlock null,
-                    isAutoAllowed = {
+                val result = preparer.prepare(
+                    snapshot = entry.snapshot,
+                    generation = entry.generation,
+                    retention = currentRequest.retention,
+                    isCurrent = {
                         lifecycle.isCurrent(run) {
                             isCurrent() && isRequestCurrent(currentRequest)
                         }
                     }
                 )
             ) {
-                NovelAudioDownloadCoordinator.Result.Ready -> PreparationResult.Ready(plan)
-                NovelAudioDownloadCoordinator.Result.Cancelled -> null
-                is NovelAudioDownloadCoordinator.Result.Failed ->
+                is NovelAudioChapterPreparer.Result.Ready ->
+                    PreparationResult.Ready(result.plan)
+
+                is NovelAudioChapterPreparer.Result.Failed ->
                     PreparationResult.Failed(
                         reason = result.reason,
-                        generation = entry.generation
+                        generation = result.generation
                     )
+
+                null -> null
             }
-            })
-        }.onSuccess { result ->
+            })        }.onSuccess { result ->
             when (result) {
                 is PreparationResult.Ready -> {
                     publishReadyIfCurrent(
