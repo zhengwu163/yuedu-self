@@ -10,9 +10,13 @@ import io.legado.app.data.entities.NovelAudioSegmentArtifactEntity
 import io.legado.app.data.entities.NovelAudioStates
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
 import io.legado.app.help.readaloud.novel.NovelAudioIdentity
+import io.legado.app.help.readaloud.novel.NovelAudioLocalFirstGate
+import io.legado.app.help.readaloud.novel.NovelAudioLocalFirstPolicy
 import io.legado.app.help.readaloud.novel.NovelAudioPinnedRecovery
 import io.legado.app.help.readaloud.novel.NovelAudioPreparationLifecycle
 import io.legado.app.help.readaloud.novel.NovelAudioRepository
+import io.legado.app.help.readaloud.novel.NovelAudioSegmentIntent
+import io.legado.app.help.readaloud.novel.NovelAudioTextRange
 import io.legado.app.help.readaloud.novel.toEntity
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -530,6 +534,89 @@ class NovelAudioRecoveryDeviceTest {
         runBlocking { recovery.recover() }
 
         assertEquals(expected.sorted(), resumed)
+    }
+
+    /**
+     * 真实 Room 上验证本地优先闸门的取样：
+     * 只有同代次 READY 计划且全部分段 artifact 就绪才允许直接本地播放。
+     */
+    @Test
+    fun localFirstGateOnlyPlaysLocallyWhenEveryArtifactIsReady() {
+        // R8 会裁剪 Kotlin 默认参数桥接方法，设备测试必须显式传全部参数。
+        val segments = listOf(
+            NovelAudioSegmentIntent.create(
+                orderedRanges = listOf(NovelAudioTextRange(0, 0, 2)),
+                text = "第一段",
+                speakerId = 0L,
+                voiceAssetId = "",
+                bindingRevision = 0L,
+                language = "zh-CN",
+                speed = 1.0
+            ),
+            NovelAudioSegmentIntent.create(
+                orderedRanges = listOf(NovelAudioTextRange(0, 2, 4)),
+                text = "第二段",
+                speakerId = 0L,
+                voiceAssetId = "",
+                bindingRevision = 0L,
+                language = "zh-CN",
+                speed = 1.0
+            )
+        )
+        val gatePlan = plan.copy(planId = "gate-plan", segments = segments)
+        dao.insertChapterPlan(
+            gatePlan.toEntity(NovelAudioRetention.PINNED)
+                .copy(state = NovelAudioStates.READY, progress = 100)
+        )
+        // 只提交第一段：READY 计划但 artifact 不完整，绝不能被当成可直接播放。
+        dao.upsertSegmentArtifact(
+            NovelAudioSegmentArtifactEntity(
+                planId = gatePlan.planId,
+                segmentId = segments[0].segmentId,
+                path = "first.ogg",
+                state = NovelAudioStates.READY
+            )
+        )
+        val gate = NovelAudioLocalFirstGate(
+            plan = { _, _ ->
+                val entity = dao.currentChapterPlan(gatePlan.physicalBookUrl, gatePlan.chapterIndex)
+                entity?.let {
+                    NovelAudioLocalFirstGate.LocalPlanSnapshot(
+                        state = it.state,
+                        generation = it.generation,
+                        allArtifactsReady = repository.allArtifactsReady(
+                            it.planId,
+                            segments.map { segment -> segment.segmentId }
+                        )
+                    )
+                }
+            },
+            online = { true }
+        )
+
+        assertEquals(
+            NovelAudioLocalFirstPolicy.Decision.PREPARE_REMOTE,
+            gate.decide(gatePlan.physicalBookUrl, gatePlan.chapterIndex, gatePlan.generation)
+        )
+
+        dao.upsertSegmentArtifact(
+            NovelAudioSegmentArtifactEntity(
+                planId = gatePlan.planId,
+                segmentId = segments[1].segmentId,
+                path = "second.ogg",
+                state = NovelAudioStates.READY
+            )
+        )
+
+        assertEquals(
+            NovelAudioLocalFirstPolicy.Decision.PLAY_LOCAL,
+            gate.decide(gatePlan.physicalBookUrl, gatePlan.chapterIndex, gatePlan.generation)
+        )
+        // 代次不匹配时即使 artifact 完整也不得复用。
+        assertEquals(
+            NovelAudioLocalFirstPolicy.Decision.PREPARE_REMOTE,
+            gate.decide(gatePlan.physicalBookUrl, gatePlan.chapterIndex, gatePlan.generation + 1)
+        )
     }
 
     private fun newRoomLifecycle(
