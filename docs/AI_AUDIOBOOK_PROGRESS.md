@@ -55,6 +55,8 @@ Keystore、数据库迁移、坏音频重新排队、旧代际隔离和准备生
   cancel/replacement 内存失效、串行 IO mutation、persist 后 ownership 复核、
   异步 release、finally cleanup 及 stale callback 隔离。新增 8 项 JVM 用例，
   定向 Gradle 任务 exit 0；该结果仍需真实 Room/下载链路集成回归。
+- 追加全量 App JVM 回归实际完成 879 项，0 failures、4 个既有 ignored，
+  Gradle `BUILD SUCCESSFUL`，exit 0；该结果不替代 Android 设备和 APK 交付验收。
 - 针对 stale repair 的独立只读审查无 actionable findings：确认旧执行在计划
   已降级后是无写返回，generation/executionAttempt、精确 taskId/planId
   及事务回滚边界均有设备断言覆盖。该审查不替代完整产品验收。
