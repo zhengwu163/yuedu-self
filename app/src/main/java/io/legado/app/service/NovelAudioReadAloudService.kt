@@ -23,6 +23,7 @@ import io.legado.app.help.readaloud.novel.NovelAudioAutoPrefetchDriver
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
 import io.legado.app.help.readaloud.novel.NovelAudioParagraphCoordinate
 import io.legado.app.help.readaloud.novel.NovelAudioPositionMapper
+import io.legado.app.help.readaloud.novel.NovelAudioProgressPersister
 import io.legado.app.help.readaloud.novel.NovelAudioRepository
 import io.legado.app.help.readaloud.novel.NovelAudioSegmentIntent
 import io.legado.app.help.readaloud.offline.canDecodeNovelAudio
@@ -55,6 +56,19 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     private var currentSegmentIndex = 0
     private var lastPreparationError: BlockReason? = null
     private var pendingPreparationWork: AudioPrefetchLifecycle.Work? = null
+
+    /**
+     * 后台播放时 Activity 不在前台，原有「进度事件 → Activity 写 durChapterPos」链断开，
+     * 因此服务自己落盘，杀进程后才能从听到的位置续播。
+     */
+    private val progressPersister = NovelAudioProgressPersister { bookUrl, chapterIndex, position ->
+        if (ReadBook.book?.bookUrl == bookUrl && ReadBook.durChapterIndex == chapterIndex) {
+            synchronized(ReadBook) {
+                ReadBook.durChapterPos = position
+                ReadBook.saveRead(true)
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -101,6 +115,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     override fun onDestroy() {
         pendingPreparationWork = null
         prepareJob?.cancel()
+        progressPersister.flush()
         NovelAudioAutoPrefetchDriver.revoke()
         exoPlayer.release()
         super.onDestroy()
@@ -147,6 +162,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     override fun playStop() {
         pendingPreparationWork = null
+        progressPersister.flush()
         NovelAudioAutoPrefetchDriver.revoke()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
@@ -156,6 +172,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     override fun pauseReadAloud(abandonFocus: Boolean) {
         pendingPreparationWork = null
+        progressPersister.flush()
         NovelAudioAutoPrefetchDriver.revoke()
         super.pauseReadAloud(abandonFocus)
         exoPlayer.pause()
@@ -395,6 +412,12 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             paragraphs = currentParagraphCoordinates()
         ) ?: return
         upTtsProgress(chapterPosition)
+        progressPersister.onProgress(
+            bookUrl = plan.physicalBookUrl,
+            chapterIndex = plan.chapterIndex,
+            chapterPosition = chapterPosition,
+            atMillis = System.currentTimeMillis()
+        )
         postEvent(
             EventBus.READ_ALOUD_PROGRESS,
             ReadAloudProgressState(
