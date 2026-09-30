@@ -10,6 +10,7 @@ import io.legado.app.data.entities.NovelAudioSegmentArtifactEntity
 import io.legado.app.data.entities.NovelAudioStates
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
 import io.legado.app.help.readaloud.novel.NovelAudioIdentity
+import io.legado.app.help.readaloud.novel.NovelAudioPinnedRecovery
 import io.legado.app.help.readaloud.novel.NovelAudioPreparationLifecycle
 import io.legado.app.help.readaloud.novel.NovelAudioRepository
 import io.legado.app.help.readaloud.novel.toEntity
@@ -471,6 +472,64 @@ class NovelAudioRecoveryDeviceTest {
                 )
             )
         }
+    }
+
+    /**
+     * 真实 Room 上验证「暂停/取消不自动重启」：
+     * 恢复队列只应取走非用户中断的 PINNED 任务。
+     */
+    @Test
+    fun startupRecoveryOnlyTakesPinnedTasksNotInterruptedByTheUser() {
+        val expected = mutableListOf<Int>()
+        listOf(
+            NovelAudioStates.QUEUED to NovelAudioRetention.PINNED,
+            NovelAudioStates.RUNNING to NovelAudioRetention.PINNED,
+            NovelAudioStates.PARTIAL to NovelAudioRetention.PINNED,
+            NovelAudioStates.WAITING_NETWORK to NovelAudioRetention.PINNED,
+            NovelAudioStates.FAILED to NovelAudioRetention.PINNED,
+            NovelAudioStates.PAUSED to NovelAudioRetention.PINNED,
+            NovelAudioStates.CANCELLED to NovelAudioRetention.PINNED,
+            NovelAudioStates.READY to NovelAudioRetention.PINNED,
+            NovelAudioStates.QUEUED to NovelAudioRetention.AUTO
+        ).forEachIndexed { offset, (state, retention) ->
+            val chapterIndex = 100 + offset
+            dao.insertDownloadTask(
+                NovelAudioDownloadTaskEntity(
+                    taskId = "startup-task-$chapterIndex",
+                    planId = "startup-plan-$chapterIndex",
+                    physicalBookUrl = plan.physicalBookUrl,
+                    chapterIndex = chapterIndex,
+                    generation = plan.generation,
+                    retention = retention,
+                    state = state
+                )
+            )
+            val resumable = retention == NovelAudioRetention.PINNED &&
+                state != NovelAudioStates.PAUSED &&
+                state != NovelAudioStates.CANCELLED &&
+                state != NovelAudioStates.FAILED &&
+                state != NovelAudioStates.READY
+            if (resumable) expected += chapterIndex
+        }
+
+        val resumed = Collections.synchronizedList(mutableListOf<Int>())
+        val recovery = NovelAudioPinnedRecovery(
+            pending = {
+                repository.recoverablePinnedTasks().map { task ->
+                    NovelAudioPinnedRecovery.PendingTask(
+                        bookUrl = task.physicalBookUrl,
+                        chapterIndex = task.chapterIndex,
+                        retention = task.retention,
+                        state = task.state
+                    )
+                }
+            },
+            resume = { _, chapterIndex -> resumed += chapterIndex; true }
+        )
+
+        runBlocking { recovery.recover() }
+
+        assertEquals(expected.sorted(), resumed)
     }
 
     private fun newRoomLifecycle(

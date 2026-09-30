@@ -91,6 +91,21 @@ class NovelAudioPinnedRecoveryTest {
     }
 
     @Test
+    fun `a failed task is never auto resumed`() {
+        val resumed = log()
+        val recovery = recovery(
+            tasks = listOf(task(3, state = NovelAudioStates.FAILED), task(4)),
+            resume = { _, index -> resumed += index; true }
+        )
+
+        runBlocking { recovery.recover() }
+
+        // 每次启动都重试已失败章节，会在同一章上反复消耗不可退款额度。
+        // 重试必须由用户显式发起，与 AUTO「失败只前进不重试」同源。
+        assertEquals(listOf(4), resumed)
+    }
+
+    @Test
     fun `a failed task does not stop the remaining queue`() {
         val attempted = log()
         val recovery = recovery(

@@ -51,18 +51,22 @@ class NovelAudioPinnedRecovery(
 
     companion object {
         /**
-         * 只有「非用户意图中断」的状态才自动恢复。
+         * 只有「非用户意图中断且未失败」的状态才自动恢复。
          *
-         * PAUSED 刻意排除：用户显式暂停必须被尊重，自动重启既违背用户意图，
-         * 也会在用户以为已停止时继续消耗不可退款的云额度。对应一期验收标准
-         * 「暂停/取消不自动重启」。CANCELLED、EXPIRED、READY 同样不动。
+         * PAUSED 排除：用户显式暂停必须被尊重，自动重启既违背用户意图，
+         * 也会在用户以为已停止时继续消耗不可退款的云额度。
+         *
+         * FAILED 排除：每次启动都重试已失败章节，会在同一章反复扣不可退款额度；
+         * 重试必须由用户显式发起。这与 AUTO 预取「失败只前进不重试」同源。
+         *
+         * 两条共同对应一期验收标准「暂停/取消不自动重启」。
+         * CANCELLED、EXPIRED、READY 同样不动。
          */
         private val RESUMABLE_STATES = setOf(
             NovelAudioStates.QUEUED,
             NovelAudioStates.RUNNING,
             NovelAudioStates.PARTIAL,
-            NovelAudioStates.WAITING_NETWORK,
-            NovelAudioStates.FAILED
+            NovelAudioStates.WAITING_NETWORK
         )
 
         /** 生产实例：只读 Room 中仍待完成的 PINNED 任务。 */
