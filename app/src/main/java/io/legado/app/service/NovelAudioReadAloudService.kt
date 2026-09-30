@@ -19,6 +19,7 @@ import io.legado.app.help.readaloud.NovelAudioPreparationState
 import io.legado.app.help.readaloud.ReadAloudProgressState
 import io.legado.app.help.readaloud.ReadAloudPlaybackState
 import io.legado.app.help.readaloud.novel.NovelAudioPreparationCoordinator
+import io.legado.app.help.readaloud.novel.NovelAudioAutoPrefetchDriver
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
 import io.legado.app.help.readaloud.novel.NovelAudioParagraphCoordinate
 import io.legado.app.help.readaloud.novel.NovelAudioPositionMapper
@@ -100,6 +101,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     override fun onDestroy() {
         pendingPreparationWork = null
         prepareJob?.cancel()
+        NovelAudioAutoPrefetchDriver.revoke()
         exoPlayer.release()
         super.onDestroy()
         publishPlaybackState(ReadAloudPlaybackState.PHASE_STOPPED)
@@ -145,6 +147,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     override fun playStop() {
         pendingPreparationWork = null
+        NovelAudioAutoPrefetchDriver.revoke()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
         prepared = null
@@ -153,6 +156,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     override fun pauseReadAloud(abandonFocus: Boolean) {
         pendingPreparationWork = null
+        NovelAudioAutoPrefetchDriver.revoke()
         super.pauseReadAloud(abandonFocus)
         exoPlayer.pause()
         publishPlaybackState(ReadAloudPlaybackState.PHASE_PAUSED, playing = false)
@@ -294,6 +298,12 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                         bookUrl = result.plan.physicalBookUrl,
                         chapterIndex = result.plan.chapterIndex,
                         chapterCount = chapterCount
+                    )
+                    // 窗口由 prefetchAssembled 更新，驱动必须排在其后才能拿到非空窗口。
+                    NovelAudioAutoPrefetchDriver.onChapterReady(
+                        work = work,
+                        bookUrl = result.plan.physicalBookUrl,
+                        chapterIndex = result.plan.chapterIndex
                     )
                     play()
                 }
