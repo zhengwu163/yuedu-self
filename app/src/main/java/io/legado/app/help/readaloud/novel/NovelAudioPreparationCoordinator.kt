@@ -40,6 +40,7 @@ object NovelAudioPreparationCoordinator {
     )
 
     private val snapshots = ConcurrentHashMap<CacheKey, SnapshotEntry>()
+    private val localFirstGate = NovelAudioLocalFirstGate.create()
     private val lifecycle = NovelAudioPreparationLifecycle(
         saveExecution = { plan, retention ->
             NovelAudioRepository(appDb).savePlanForExecution(plan, retention)
@@ -161,6 +162,26 @@ object NovelAudioPreparationCoordinator {
                     isCurrent() && isRequestCurrent(currentRequest)
                 }
             ) return@runBlock null
+            // 本地优先闸门必须先于任何装配：装配会创建云客户端与预算账本，
+            // 顺序颠倒会让离线播放已下载章节也先建连接，飞行模式产生真实网络尝试。
+            when (
+                localFirstGate.decide(
+                    bookUrl = currentRequest.bookUrl,
+                    chapterIndex = currentRequest.chapterIndex,
+                    expectedGeneration = entry.generation
+                )
+            ) {
+                NovelAudioLocalFirstPolicy.Decision.PLAY_LOCAL ->
+                    return@runBlock PreparationResult.Local(entry.generation)
+
+                NovelAudioLocalFirstPolicy.Decision.WAIT_FOR_NETWORK ->
+                    return@runBlock PreparationResult.Failed(
+                        reason = "WAITING_NETWORK",
+                        generation = entry.generation
+                    )
+
+                NovelAudioLocalFirstPolicy.Decision.PREPARE_REMOTE -> Unit
+            }
             // 当前章与后续章共用同一套凭据、预算、分析与下载装配。
             val environment = NovelAudioPreparationEnvironment.open()
                 ?: return@runBlock PreparationResult.Failed(
@@ -212,6 +233,26 @@ object NovelAudioPreparationCoordinator {
                             chapterIndex = result.plan.chapterIndex,
                             planId = result.plan.planId,
                             generation = result.plan.generation,
+                            ready = true
+                        )
+                    )
+                }
+
+                // 本地已完整：不经远端准备直接发布就绪，播放器随后只读本地 artifact。
+                is PreparationResult.Local -> {
+                    val plan = NovelAudioRepository(appDb).currentPlan(
+                        currentRequest.bookUrl,
+                        currentRequest.chapterIndex
+                    )
+                    publishReadyIfCurrent(
+                        run,
+                        currentRequest,
+                        isCurrent,
+                        NovelAudioPreparationState(
+                            bookUrl = currentRequest.bookUrl,
+                            chapterIndex = currentRequest.chapterIndex,
+                            planId = plan?.planId.orEmpty(),
+                            generation = result.generation,
                             ready = true
                         )
                     )
@@ -315,6 +356,9 @@ object NovelAudioPreparationCoordinator {
 
     sealed interface PreparationResult {
         data class Ready(val plan: NovelAudioChapterPlan) : PreparationResult
+
+        /** 本地已完整，未经任何远端调用。 */
+        data class Local(val generation: Long) : PreparationResult
         data class Failed(
             val reason: String,
             val generation: Long
