@@ -21,6 +21,7 @@ import io.legado.app.help.readaloud.ReadAloudPlaybackState
 import io.legado.app.help.readaloud.novel.NovelAudioPreparationCoordinator
 import io.legado.app.help.readaloud.novel.NovelAudioAutoPrefetchDriver
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
+import io.legado.app.help.readaloud.novel.NovelAudioContinuationPolicy
 import io.legado.app.help.readaloud.novel.NovelAudioParagraphCoordinate
 import io.legado.app.help.readaloud.novel.NovelAudioPositionMapper
 import io.legado.app.help.readaloud.novel.NovelAudioProgressPersister
@@ -337,14 +338,23 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                     if (result.reason == BlockReason.MISSING_PLAN ||
                         result.reason == BlockReason.PLAN_NOT_READY
                     ) {
-                        if (work != null &&
+                        val hasWork = work != null &&
                             AudioPrefetchPlayback.lifecycle.isCurrent(work)
-                        ) {
+                        if (hasWork) {
                             pendingPreparationWork = work
                             publishPlaybackState(
                                 ReadAloudPlaybackState.PHASE_PREPARING,
                                 playing = false
                             )
+                        }
+                        // 跨章连播不带用户发起标记，准备策略不会自动发起；
+                        // 若此处不补一次，界面会停在准备中且永远收不到完成事件。
+                        if (NovelAudioContinuationPolicy.shouldPrepareOnBlock(
+                                missingOrNotReady = true,
+                                hasCurrentWork = hasWork
+                            )
+                        ) {
+                            requestContinuationPreparation()
                         }
                         return@onSuccess
                     }
@@ -371,6 +381,29 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 message = BlockReason.PREPARATION_FAILURE.name
             )
         }
+    }
+
+    /**
+     * 跨章连播补救：为当前章补一次准备请求。
+     *
+     * 跨章路径不携带用户发起标记，[NovelAudioPreparationPolicy] 不会自动发起准备；
+     * 若这里不补，界面会停在准备中并永远等不到完成事件。
+     * 正文已缓存时 startCached 会立即开始；否则等待 ReadBook 的最终正文回调。
+     */
+    private fun requestContinuationPreparation() {
+        val bookUrl = ReadBook.book?.bookUrl.orEmpty()
+        val chapterIndex = ReadBook.durChapterIndex
+        if (bookUrl.isBlank() || chapterIndex < 0) return
+        NovelAudioPreparationCoordinator.request(bookUrl, chapterIndex)
+        NovelAudioPreparationCoordinator.startCached(
+            bookUrl = bookUrl,
+            chapterIndex = chapterIndex,
+            isCurrent = {
+                ReadBook.book?.bookUrl == bookUrl &&
+                    ReadBook.durChapterIndex == chapterIndex &&
+                    ReadBook.contentLoadFinish
+            }
+        )
     }
 
     private fun publishPlaybackState(
@@ -404,8 +437,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         )
     }
 
-    private fun publishSegmentProgress() {
-        val plan = prepared?.plan ?: return
+    private fun publishSegmentProgress() {        val plan = prepared?.plan ?: return
         val segment = plan.playableSegments.getOrNull(currentSegmentIndex) ?: return
         val chapterPosition = chapterPositionForSegment(
             segment = segment,
