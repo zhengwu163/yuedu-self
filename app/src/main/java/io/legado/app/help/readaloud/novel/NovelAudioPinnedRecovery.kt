@@ -50,13 +50,18 @@ class NovelAudioPinnedRecovery(
     }
 
     companion object {
-        /** 只有仍待完成的状态才需要恢复；READY、取消与过期都不动。 */
+        /**
+         * 只有「非用户意图中断」的状态才自动恢复。
+         *
+         * PAUSED 刻意排除：用户显式暂停必须被尊重，自动重启既违背用户意图，
+         * 也会在用户以为已停止时继续消耗不可退款的云额度。对应一期验收标准
+         * 「暂停/取消不自动重启」。CANCELLED、EXPIRED、READY 同样不动。
+         */
         private val RESUMABLE_STATES = setOf(
             NovelAudioStates.QUEUED,
             NovelAudioStates.RUNNING,
             NovelAudioStates.PARTIAL,
             NovelAudioStates.WAITING_NETWORK,
-            NovelAudioStates.PAUSED,
             NovelAudioStates.FAILED
         )
 

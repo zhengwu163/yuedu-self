@@ -77,6 +77,20 @@ class NovelAudioPinnedRecoveryTest {
     }
 
     @Test
+    fun `a user paused task is never auto resumed`() {
+        val resumed = log()
+        val recovery = recovery(
+            tasks = listOf(task(3, state = NovelAudioStates.PAUSED), task(4)),
+            resume = { _, index -> resumed += index; true }
+        )
+
+        runBlocking { recovery.recover() }
+
+        // 用户显式暂停必须被尊重：自动重启会违背用户意图并消耗不可退款额度。
+        assertEquals(listOf(4), resumed)
+    }
+
+    @Test
     fun `a failed task does not stop the remaining queue`() {
         val attempted = log()
         val recovery = recovery(
