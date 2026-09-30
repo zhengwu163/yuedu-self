@@ -8,14 +8,8 @@ import io.legado.app.data.entities.BookChapter
 import io.legado.app.data.entities.NovelAudioRetention
 import io.legado.app.help.book.BookContent
 import io.legado.app.help.coroutine.Coroutine
-import io.legado.app.help.readaloud.offline.NovelAudioArtifactStore
-import io.legado.app.help.readaloud.offline.NovelAudioDownloadCoordinator
-import io.legado.app.help.readaloud.offline.canDecodeNovelAudio
-import io.legado.app.help.readaloud.server.NovelAudioAndroidConfigStore
 import io.legado.app.model.ReadBook
 import io.legado.app.help.readaloud.NovelAudioPreparationState
-import splitties.init.appCtx
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import io.legado.app.utils.postEvent
 import kotlinx.coroutines.CoroutineStart
@@ -167,84 +161,22 @@ object NovelAudioPreparationCoordinator {
                     isCurrent() && isRequestCurrent(currentRequest)
                 }
             ) return@runBlock null
-            val credentials = NovelAudioAndroidConfigStore.open(appCtx).load()
+            // 当前章与后续章共用同一套凭据、预算、分析与下载装配。
+            val environment = NovelAudioPreparationEnvironment.open()
                 ?: return@runBlock PreparationResult.Failed(
                     reason = "MISSING_CREDENTIALS",
                     generation = entry.generation
                 )
-            val characterStore = NovelAudioRoomCharacterStore(appDb)
-            val registry = CharacterRegistry(characterStore)
-            val budgetLedger = NovelAudioBudgetLedger(
-                File(appCtx.noBackupFilesDir, "novel-audio-budget.json")
-            )
-            val client = credentials.newClient(budgetLedger)
-            val analysis = NovelAudioAnalysisCoordinator(
-                analyze = client::analyze,
-                registry = registry,
-                voices = client::voices,
-                match = client::match
-            )
-            val repository = NovelAudioRepository(appDb)
-            val existingCharacters = characterStore.characters(entry.snapshot.workKey)
-            val existingBindings = characterStore
-                .voiceBindings(existingCharacters.map { it.id }.toSet())
-                .map { it.toDomain() }
-            var execution: NovelAudioRepository.Execution? = null
-            val producer = NovelAudioPlanProducer(
-                analyze = { snapshot, scope, generation, characters, units, bindings ->
-                    analysis.analyze(
-                        snapshot = snapshot,
-                        scope = scope,
-                        generation = generation,
-                        existingCharacters = characters,
-                        parsedUnits = units,
-                        existingBindings = bindings
-                    )
-                },
-                persist = { plan, retention ->
-                    execution = lifecycle.persistBlocking(
-                        run,
-                        plan,
-                        isAutoAllowed = {
-                            isCurrent() && isRequestCurrent(currentRequest)
-                        }
-                    )
-                    execution != null
-                }
-            )
-            val artifactRoot = File(appCtx.filesDir, AUDIO_DIRECTORY)
-            val decoder: (File) -> Boolean = ::canDecodeNovelAudio
-            val downloadCoordinator = NovelAudioDownloadCoordinator(
-                repository = repository,
-                artifactStore = NovelAudioArtifactStore(
-                    rootDirectory = artifactRoot,
-                    decoder = decoder
-                ),
-                filesRoot = artifactRoot,
-                synthesize = client::synthesize,
-                decoder = decoder
-            )
-            // 单章准备顺序只有一份实现，当前章与 AUTO 后续章共用，避免各自演化。
-            val preparer = NovelAudioChapterPreparer(
-                produce = { snapshot, generation, retention, isPlanCurrent ->
-                    producer.produce(
-                        snapshot = snapshot,
-                        scope = NovelAudioIdentity.serverScope(credentials.baseUrl),
-                        generation = generation,
-                        existingCharacters = existingCharacters,
-                        existingBindings = existingBindings,
-                        retention = retention,
-                        isCurrent = isPlanCurrent
-                    )
-                },
-                execution = { execution },
-                download = { token, isAutoAllowed ->
-                    downloadCoordinator.downloadPlan(
-                        execution = token,
-                        isAutoAllowed = isAutoAllowed
-                    )
-                }
-            )
+            // 单章准备顺序只有一份实现；当前章在此绑定 run token fencing。
+            val preparer = environment.preparer { plan, retention ->
+                lifecycle.persistBlocking(
+                    run,
+                    plan,
+                    isAutoAllowed = {
+                        isCurrent() && isRequestCurrent(currentRequest)
+                    }
+                )
+            }
             when (
                 val result = preparer.prepare(
                     snapshot = entry.snapshot,
@@ -380,7 +312,6 @@ object NovelAudioPreparationCoordinator {
     }
 
     private const val MAX_CACHED_SNAPSHOTS = 12
-    private const val AUDIO_DIRECTORY = "novel-audio"
 
     sealed interface PreparationResult {
         data class Ready(val plan: NovelAudioChapterPlan) : PreparationResult

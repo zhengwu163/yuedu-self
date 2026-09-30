@@ -9,8 +9,9 @@ import java.io.File
 /**
  * 准备协调器的结构性接线回归；与 [NovelAudioChapterPreparerTest] 的行为测试配对。
  *
- * 单章准备顺序必须只有一份实现：协调器委派给 [NovelAudioChapterPreparer]，
+ * 单章准备顺序必须只有一份实现：协调器经共享环境取得 [NovelAudioChapterPreparer]，
  * 不再内联展开下载结果分支，否则当前章与 AUTO 后续章会各自演化出不同顺序。
+ * 装配归属由 [NovelAudioPreparationEnvironmentWiringTest] 覆盖。
  */
 class NovelAudioPreparationWiringTest {
 
@@ -23,7 +24,10 @@ class NovelAudioPreparationWiringTest {
     fun `coordinator delegates single chapter preparation to the shared preparer`() {
         val text = source("help/readaloud/novel/NovelAudioPreparationCoordinator.kt")
 
-        assertTrue("协调器必须使用共享准备顺序", text.contains("NovelAudioChapterPreparer("))
+        assertTrue(
+            "协调器必须经共享环境取得准备顺序",
+            text.contains("environment.preparer")
+        )
         assertTrue("必须调用共享准备入口", text.contains(".prepare("))
     }
 
@@ -57,7 +61,7 @@ class NovelAudioPreparationWiringTest {
 
     @Test
     fun `the budget ledger stays independent from server credentials`() {
-        val text = source("help/readaloud/novel/NovelAudioPreparationCoordinator.kt")
+        val text = source("help/readaloud/novel/NovelAudioPreparationEnvironment.kt")
 
         assertTrue(
             "预算账本必须放在 noBackupFilesDir，避免随凭据清除被重置",
