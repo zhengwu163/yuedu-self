@@ -50,6 +50,9 @@ import io.legado.app.help.readaloud.ReadAloudConfigChangeNotifier
 import io.legado.app.help.readaloud.ReadAloudSpeakerLoudnessManager
 import io.legado.app.help.readaloud.casting.CastingRuleSet
 import io.legado.app.help.readaloud.casting.TtsCastingStore
+import io.legado.app.help.readaloud.novel.NovelAudioPinnedChapterPreparer
+import io.legado.app.help.readaloud.novel.NovelAudioPinnedDownloadLabels
+import io.legado.app.help.readaloud.novel.NovelAudioPinnedDownloadPresenter
 import io.legado.app.help.readaloud.role.ReadAloudPreprocessRuleConfig
 import io.legado.app.help.readaloud.role.ReadAloudQuotePair
 import io.legado.app.help.readaloud.role.ReadAloudRolePreprocessor
@@ -58,6 +61,7 @@ import io.legado.app.help.readaloud.speech.SpeechRoute
 import io.legado.app.lib.permission.Permissions
 import io.legado.app.lib.permission.PermissionsCompat
 import io.legado.app.model.ReadAloud
+import io.legado.app.model.ReadBook
 import io.legado.app.service.BaseReadAloudService
 import io.legado.app.ui.config.compose.SettingActionSpec
 import io.legado.app.ui.config.compose.SettingChoiceOption
@@ -91,6 +95,7 @@ private const val KEY_AI_READ_ALOUD_BGM_MANAGE = "aiReadAloudBgmManage"
 private const val KEY_AI_READ_ALOUD_USAGE_RECORDS = "aiReadAloudUsageRecords"
 private const val KEY_AI_READ_ALOUD_MODEL_ROUTING = "aiReadAloudModelRouting"
 private const val KEY_NOVEL_AUDIO_SERVER = "novelAudioServer"
+private const val KEY_NOVEL_AUDIO_PINNED_DOWNLOAD = "novelAudioPinnedDownload"
 private const val KEY_TTS_CASTING_TEMPLATE = "ttsCastingTemplate"
 private const val KEY_READ_ALOUD_SPEAKER_MANAGE = "readAloudSpeakerManage"
 private const val KEY_READ_ALOUD_LOUDNESS_RESET = "readAloudSpeakerLoudnessReset"
@@ -740,12 +745,22 @@ class ReadAloudConfigDialog() : ComposeDialogFragment(),
     }
 
     private fun engineItems(): List<SettingItemSpec> {
+        val isNovelAudioRoute = SpeechRoute.fromTtsEngineValue(ReadAloud.ttsEngine)
+            .engineType == SpeechRoute.ENGINE_NOVEL_AUDIO
         return listOf(
             action(
                 key = PreferKey.ttsEngine,
                 title = getString(R.string.speak_engine),
                 summary = speakEngineSummary,
                 onClick = { showDialogFragment(SpeakEngineDialog()) }
+            ),
+            // 仅在 AI 多角色听书路线下出现；普通朗读用户看到此入口只会困惑。
+            action(
+                key = KEY_NOVEL_AUDIO_PINNED_DOWNLOAD,
+                title = "下载后续章节音频",
+                summary = "手动固定的音频不会被自动清理",
+                visible = isNovelAudioRoute,
+                onClick = { showPinnedDownloadOptions() }
             ),
             action(
                 key = KEY_READ_ALOUD_SPEAKER_MANAGE,
@@ -760,6 +775,43 @@ class ReadAloudConfigDialog() : ComposeDialogFragment(),
                 onClick = { IntentHelp.openTTSSetting() }
             )
         )
+    }
+
+    /**
+     * 固定下载入口：复用既有主题化选择对话框与既有 toast，不新增绘制组件，
+     * 因此主题四态没有新增风险面。范围、进度与文案全部来自共享逻辑层。
+     */
+    private fun showPinnedDownloadOptions() {
+        val book = ReadBook.book ?: return
+        val chapterCount = ReadBook.chapterSize
+        val presenter = NovelAudioPinnedDownloadPresenter(
+            prepare = { chapterIndex, retention ->
+                NovelAudioPinnedChapterPreparer.prepare(book, chapterIndex, retention)
+            },
+            onState = { state ->
+                lifecycleScope.launch {
+                    toastOnUi(NovelAudioPinnedDownloadLabels.state(state))
+                }
+            }
+        )
+        val options = presenter.options(ReadBook.durChapterIndex, chapterCount)
+        if (options.isEmpty()) {
+            toastOnUi("没有可下载的章节")
+            return
+        }
+        showComposeChoiceListDialog(
+            title = "下载后续章节音频",
+            labels = options.map { NovelAudioPinnedDownloadLabels.option(it) }
+        ) { index ->
+            val option = options.getOrNull(index) ?: return@showComposeChoiceListDialog
+            lifecycleScope.launch {
+                presenter.start(
+                    selection = option.selection,
+                    currentChapterIndex = ReadBook.durChapterIndex,
+                    chapterCount = chapterCount
+                )
+            }
+        }
     }
 
     private fun switch(
