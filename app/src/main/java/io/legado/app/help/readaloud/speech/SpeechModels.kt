@@ -74,6 +74,7 @@ data class SpeechRoute(
         const val ENGINE_DEFAULT = "default"
         const val ENGINE_SYSTEM = "system"
         const val ENGINE_HTTP = "http"
+        const val ENGINE_NOVEL_AUDIO = "novel_audio"
         const val SOURCE_AUTO = "auto"
         const val SOURCE_MANUAL = "manual"
 
@@ -204,7 +205,13 @@ data class SpeechRoute(
                 route
             }
             // engineType 白名单校验：未知类型回退 default（AD-08 明示兜底）
-            return if (unwrapped.engineType in setOf(ENGINE_DEFAULT, ENGINE_SYSTEM, ENGINE_HTTP)) {
+            return if (unwrapped.engineType in setOf(
+                    ENGINE_DEFAULT,
+                    ENGINE_SYSTEM,
+                    ENGINE_HTTP,
+                    ENGINE_NOVEL_AUDIO
+                )
+            ) {
                 unwrapped
             } else {
                 SpeechRoute(engineType = ENGINE_DEFAULT)

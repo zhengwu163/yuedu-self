@@ -1,5 +1,9 @@
 # Legado（阅读M）
 
+## AI 听书本阶段裁定（2026-09-28）
+
+本阶段遵循 `docs/AI_AUDIOBOOK_ANDROID_DELIVERY_RULES.md`：允许 Mac 构建并交付经 Android 设备验收的 debug 包；缺失规范与门禁按实际补建，保留测试、安全和迁移要求。Python 专用环境在 macOS 使用 `ai_tests/venv/bin/python`，Windows 使用 `ai_tests/venv/Scripts/python.exe`。当前同步目标是用户指定 iCode 的 `origin/main`，推送前核验远端与祖先关系，不强推。按已批准方案连续实现，不再逐模块请求确认。正式发布仍遵循下文发布规范。
+
 > Android 开源电子书阅读器（fork 自 [legado-E](https://github.com/Luoyacheng/legado-E)，私有仓 `github.com/syq17496152/legado.git`）。核心为自定义书源规则引擎（CSS/JSONPath/XPath/正则/JS 五种解析），含内置视频播放器/订阅源/高亮规则/自动任务等扩展功能。遇到与原版行为不一致的问题，先对比原版代码定位回归原因。
 
 ## 构建与测试（快速命令）

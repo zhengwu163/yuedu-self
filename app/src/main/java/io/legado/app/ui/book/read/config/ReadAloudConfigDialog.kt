@@ -90,6 +90,7 @@ import io.legado.app.utils.toastOnUi
 private const val KEY_AI_READ_ALOUD_BGM_MANAGE = "aiReadAloudBgmManage"
 private const val KEY_AI_READ_ALOUD_USAGE_RECORDS = "aiReadAloudUsageRecords"
 private const val KEY_AI_READ_ALOUD_MODEL_ROUTING = "aiReadAloudModelRouting"
+private const val KEY_NOVEL_AUDIO_SERVER = "novelAudioServer"
 private const val KEY_TTS_CASTING_TEMPLATE = "ttsCastingTemplate"
 private const val KEY_READ_ALOUD_SPEAKER_MANAGE = "readAloudSpeakerManage"
 private const val KEY_READ_ALOUD_LOUDNESS_RESET = "readAloudSpeakerLoudnessReset"
@@ -127,6 +128,7 @@ enum class ReadAloudConfigGroup(
     AiRole(
         "\u591a\u89d2\u8272",
         setOf(
+            KEY_NOVEL_AUDIO_SERVER,
             PreferKey.aiReadAloudRoleEnabled,
             KEY_AI_READ_ALOUD_MODEL_ROUTING,
             PreferKey.aiReadAloudRoleBackupModelId,
@@ -251,6 +253,7 @@ class ReadAloudConfigDialog() : ComposeDialogFragment(),
         get() {
             val route = SpeechRoute.fromTtsEngineValue(ReadAloud.ttsEngine)
             val engineName = when (route.engineType) {
+                SpeechRoute.ENGINE_NOVEL_AUDIO -> "AI 多角色听书"
                 SpeechRoute.ENGINE_HTTP -> route.engineValue.toLongOrNull()
                     ?.let { appDb.httpTTSDao.getName(it) }
                     ?: "HTTP TTS"
@@ -493,6 +496,12 @@ class ReadAloudConfigDialog() : ComposeDialogFragment(),
             .size
         val loudnessCount = ReadAloudSpeakerLoudnessManager.learnedSpeakerCount()
         return listOf(
+            action(
+                key = KEY_NOVEL_AUDIO_SERVER,
+                title = "AI 多角色听书服务",
+                summary = "配置服务地址、访问令牌与测试连接",
+                onClick = { showDialogFragment(NovelAudioServerConfigDialog()) }
+            ),
             action(
                 key = "ttsCastingPickerEntry",
                 title = "模板选择与管理",

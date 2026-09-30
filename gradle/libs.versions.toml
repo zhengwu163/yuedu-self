@@ -40,7 +40,7 @@ quickChineseTransfer = "0.2.17"
 splitties = "3.0.0"
 desugar = "2.1.5"
 
-#kotlinxSerialization = "1.8.0"
+kotlinxSerialization = "1.7.3"
 swiperefreshlayout = "1.2.0"
 collection = "1.5.0"
 
@@ -225,12 +225,13 @@ brotli = { module = "org.brotli:dec", version.ref = "brotli" }
 junit = { module = "junit:junit", version = "4.13.2" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-serialization-core-jvm = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core-jvm", version.ref = "kotlinxSerialization" }
 
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
 
 
-#kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 #kotlinx-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-serialization-protobuf", version.ref = "kotlinxSerialization" }
 liveeventbus = { module = "com.github.michaellee123:LiveEventBus", version.ref = "liveeventbus" }
 material = { module = "com.google.android.material:material", version.ref = "material" }

@@ -29,3 +29,12 @@ data class ReadAloudPlaybackState(
         const val PHASE_ERROR = "error"
     }
 }
+
+data class NovelAudioPreparationState(
+    val bookUrl: String = "",
+    val chapterIndex: Int = -1,
+    val planId: String = "",
+    val generation: Long = -1L,
+    val ready: Boolean = false,
+    val reason: String = ""
+)

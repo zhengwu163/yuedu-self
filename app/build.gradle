@@ -112,7 +112,12 @@ android {
         targetSdk 36
         versionCode 10000 + gitCommits
         versionName version
-        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        // Keep the normal runner unchanged. The theme runner is deliberately opt-in because it
+        // replaces the target Application and must never affect unrelated instrumentation.
+        def instrumentationRunner = project.findProperty("useThemeDeviceTestRunner") == "true"
+                ? "io.legado.app.NovelAudioThemeTestRunner"
+                : "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner instrumentationRunner
         project.ext.set("archivesBaseName", name + "_" + version)
 
         buildConfigField "String", "Cronet_Version", "\"$CronetVersion\""
@@ -190,6 +195,7 @@ android {
             buildConfigField "boolean", "BUILD_DEBUG", "true"
             minifyEnabled true
             shrinkResources = true
+            testProguardFiles 'proguard-debug-test-rules.pro'
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro', 'cronet-proguard-rules.pro', 'proguard-debug-rules.pro'
         }
     }
@@ -276,6 +282,9 @@ dependencies {
     // TTS 选角模板/路由解析单测需真实 org.json（returnDefaultValues 桩无法提供 JSONObject）
     testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.bundles.androidTest)
+    // Room MigrationTestHelper loads schema bundles through kotlinx.serialization at runtime.
+    androidTestImplementation(libs.kotlinx.serialization.json)
+    androidTestImplementation(libs.kotlinx.serialization.core.jvm)
     // Compose UI 测试（A2.1.3）：createComposeRule 走宿主 Activity 渲染，故
     // ui-test-manifest 必须进 debug 变体清单（Google 官方推荐组合）
     // 注意：androidTest 配置不继承 implementation，需单独引入 compose-bom 约束版本

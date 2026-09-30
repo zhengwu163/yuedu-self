@@ -15,7 +15,13 @@ internal class AtomicTextFileStore(
 
     private val staging = File(target.parentFile, ".${target.name}.staging")
     private val backup = File(target.parentFile, ".${target.name}.backup")
-    private val pathLock = pathLocks.computeIfAbsent(target.canonicalPath) { Any() }
+    private val pathLock = synchronized(pathLocks) {
+        // Avoid ConcurrentMap.computeIfAbsent: the current Android core-library
+        // desugaring runtime does not provide the generated j$ default method.
+        pathLocks[target.canonicalPath] ?: Any().also {
+            pathLocks[target.canonicalPath] = it
+        }
+    }
 
     fun writeVerified(text: String, verify: (String) -> Boolean) {
         synchronized(pathLock) {

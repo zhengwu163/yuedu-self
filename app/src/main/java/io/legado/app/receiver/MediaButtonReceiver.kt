@@ -4,10 +4,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.view.KeyEvent
+import io.legado.app.constant.AppLog
 import io.legado.app.constant.EventBus
 import io.legado.app.data.appDb
 import io.legado.app.help.LifecycleHelp
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.coroutine.Coroutine
+import io.legado.app.help.readaloud.offline.AudioPrefetchPlayback
 import io.legado.app.model.AudioPlay
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
@@ -18,11 +21,6 @@ import io.legado.app.ui.book.read.ReadBookActivity
 import io.legado.app.utils.LogUtils
 import io.legado.app.utils.getPrefBoolean
 import io.legado.app.utils.postEvent
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers.IO
-import kotlinx.coroutines.Dispatchers.Main
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 
 /**
@@ -52,6 +50,22 @@ class MediaButtonReceiver : BroadcastReceiver() {
                 if (action == KeyEvent.ACTION_DOWN) {
                     LogUtils.d(TAG, "Receive mediaButton event, keycode:$keycode")
                     when (keycode) {
+                        KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                            // pause/stop 桥同步撤销待加载的朗读，未启动服务时也生效。
+                            ReadAloud.pause(context)
+                            AudioPlay.pause(context)
+                        }
+
+                        KeyEvent.KEYCODE_MEDIA_STOP -> {
+                            ReadAloud.stop(context)
+                            AudioPlay.stop()
+                        }
+
+                        KeyEvent.KEYCODE_MEDIA_PLAY -> readAloud(context, toggle = false)
+
+                        KeyEvent.KEYCODE_HEADSETHOOK,
+                        KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> readAloud(context)
+
                         KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
                             if (context.getPrefBoolean("mediaButtonPerNext", false)) {
                                 ReadBook.moveToPrevChapter(true)
@@ -68,21 +82,22 @@ class MediaButtonReceiver : BroadcastReceiver() {
                             }
                         }
 
-                        else -> readAloud(context)
+                        else -> Unit
                     }
                 }
             }
             return true
         }
 
-        fun readAloud(context: Context, isMediaKey: Boolean = true) {
+        fun readAloud(context: Context, isMediaKey: Boolean = true, toggle: Boolean = true) {
             when {
                 BaseReadAloudService.isRun -> {
                     if (BaseReadAloudService.isPlay()) {
+                        if (!toggle) return
                         ReadAloud.pause(context)
                         AudioPlay.pause(context)
                     } else {
-                        ReadAloud.resume(context)
+                        ReadAloud.resume(context, userInitiated = true)
                         AudioPlay.resume(context)
                     }
                 }
@@ -90,7 +105,7 @@ class MediaButtonReceiver : BroadcastReceiver() {
                 AudioPlayService.isRun -> {
                     if (AudioPlayService.pause) {
                         AudioPlay.resume(context)
-                    } else {
+                    } else if (toggle) {
                         AudioPlay.pause(context)
                     }
                 }
@@ -108,18 +123,37 @@ class MediaButtonReceiver : BroadcastReceiver() {
                 else -> if (AppConfig.mediaButtonOnExit || LifecycleHelp.activitySize() > 0 || !isMediaKey) {
                     ReadAloud.upReadAloudClass()
                     if (ReadBook.book != null) {
-                        ReadBook.readAloud()
+                        ReadBook.readAloud(userInitiated = true)
                     } else {
-                        CoroutineScope(IO).launch {
-                            appDb.bookDao.lastReadBook?.let {
-                                withContext(Main) {
-                                    ReadBook.resetData(it)
-                                    ReadBook.clearTextChapter()
-                                    ReadBook.loadContent(false) {
-                                        ReadBook.readAloud()
-                                    }
-                                }
+                        // 先保存按键意图；查书/加载期间的停止或新播放会使它失效。
+                        val lifecycle = AudioPrefetchPlayback.lifecycle
+                        val gesture = lifecycle.beginDeferredPlay()
+                        var prefetchRequest: String? = null
+                        Coroutine.async {
+                            appDb.bookDao.lastReadBook
+                        }.onSuccess { book ->
+                            if (book == null || ReadBook.book != null) {
+                                lifecycle.cancelRequest(gesture)
+                                return@onSuccess
                             }
+                            val request = lifecycle.bindDeferredPlay(gesture, book.bookUrl)
+                                ?: return@onSuccess
+                            prefetchRequest = request
+                            ReadBook.resetData(book)
+                            ReadBook.clearTextChapter()
+                            ReadBook.loadContent(false) {
+                                ReadBook.readAloud(
+                                    prefetchRequest = request,
+                                    prefetchContinuation = null
+                                )
+                            }
+                        }.onError {
+                            lifecycle.cancelRequest(gesture)
+                            lifecycle.cancelRequest(prefetchRequest)
+                            AppLog.put("媒体键加载朗读书籍失败", it)
+                        }.onCancel {
+                            lifecycle.cancelRequest(gesture)
+                            lifecycle.cancelRequest(prefetchRequest)
                         }
                     }
                 }

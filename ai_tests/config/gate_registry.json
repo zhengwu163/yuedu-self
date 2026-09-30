@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "gates": [
+    {
+      "id": "code-change-has-test",
+      "stages": ["commit", "ci", "deliver"],
+      "command": ["audit_code_change_has_test.py"],
+      "description": "Every changed production file has a changed JVM, Room, or Android test."
+    },
+    {
+      "id": "gson-generic-signature",
+      "stages": ["ci", "deliver"],
+      "command": ["audit_gson_generic_signature.py"],
+      "description": "Gson models with generic fields retain explicit Keep annotations."
+    },
+    {
+      "id": "theme-token-violation",
+      "stages": ["commit", "ci", "deliver"],
+      "command": ["audit_theme_token_violation.py"],
+      "description": "Changed UI sources do not introduce unregistered hard-coded colors."
+    },
+    {
+      "id": "host-refresh-coverage",
+      "stages": ["commit", "ci", "deliver"],
+      "command": ["audit_host_refresh_coverage.py"],
+      "description": "Changed host screens have a matching refresh/state test."
+    }
+  ]
+}

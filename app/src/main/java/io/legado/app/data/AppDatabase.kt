@@ -1,4 +1,4 @@
-﻿package io.legado.app.data
+package io.legado.app.data
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
@@ -48,6 +48,7 @@ import io.legado.app.data.dao.SearchBookDao
 import io.legado.app.data.dao.SearchKeywordDao
 import io.legado.app.data.dao.SourceGroupCoverDao
 import io.legado.app.data.dao.DownloadTaskDao
+import io.legado.app.data.dao.NovelAudioDao
 import io.legado.app.data.dao.ServerDao
 import io.legado.app.data.dao.TxtTocRuleDao
 import io.legado.app.data.dao.UrlRecordDao
@@ -81,6 +82,12 @@ import io.legado.app.data.entities.CoverGalleryGroup
 import io.legado.app.data.entities.CoverGalleryImage
 import io.legado.app.data.entities.DictRule
 import io.legado.app.data.entities.DownloadTaskEntity
+import io.legado.app.data.entities.NovelAudioAliasEntity
+import io.legado.app.data.entities.NovelAudioChapterPlanEntity
+import io.legado.app.data.entities.NovelAudioDownloadTaskEntity
+import io.legado.app.data.entities.NovelAudioMergeRecordEntity
+import io.legado.app.data.entities.NovelAudioSegmentArtifactEntity
+import io.legado.app.data.entities.NovelAudioVoiceBindingEntity
 import io.legado.app.data.entities.HttpTTS
 import io.legado.app.data.entities.KeyboardAssist
 import io.legado.app.data.entities.ParagraphRule
@@ -125,7 +132,7 @@ val appDb by lazy {
 }
 
 @Database(
-    version = 110,
+    version = 113,
     exportSchema = true,
     entities = [Book::class, BookGroup::class, BookSource::class, BookChapter::class,
         ReplaceRule::class, SearchBook::class, SearchKeyword::class, Cookie::class,
@@ -146,7 +153,10 @@ val appDb by lazy {
         AiReadAloudUsageRecord::class,
         AiAgentSession::class, AiAgentJob::class, AiAgentTrace::class,
         AiMemoryItem::class, AiMemoryFragment::class, AiMemoryItemFts::class, AiMemoryFragmentFts::class,
-        DownloadTaskEntity::class],
+        DownloadTaskEntity::class,
+        NovelAudioAliasEntity::class, NovelAudioVoiceBindingEntity::class,
+        NovelAudioChapterPlanEntity::class, NovelAudioSegmentArtifactEntity::class,
+        NovelAudioDownloadTaskEntity::class, NovelAudioMergeRecordEntity::class],
     views = [BookSourcePart::class],
     autoMigrations = [
         AutoMigration(from = 43, to = 44),
@@ -209,6 +219,8 @@ val appDb by lazy {
         // download-manager: 106→107 使用手动 Migration（DatabaseMigrations.migration_106_107），新增 download_tasks 表（下载任务持久化）
         // download-manager-optimize B8: 107→108 使用手动 Migration（migration_107_108），download_tasks 删除 errorMsg/resumePointJson/segmentsJson 僵尸列（建新表迁数据）
         // video-sniff-403-and-rss-classic-fix 4.8e: 108→109 使用手动 Migration（migration_108_109），playHistories 主键扩为 (articleUrl, videoUrl, rssSourceId)（建新表迁数据）
+        // novel-audio: 110→111 使用手动 Migration（DatabaseMigrations.migration_110_111），仅新增六张 AI 听书领域表
+        // novel-audio: 111→112 使用手动 Migration（DatabaseMigrations.migration_111_112），新增状态原因字段
     ]
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -261,6 +273,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract val aiAgentDao: AiAgentDao
     abstract val aiMemoryDao: AiMemoryDao
     abstract val downloadTaskDao: DownloadTaskDao
+    abstract val novelAudioDao: NovelAudioDao
 
     companion object {
 

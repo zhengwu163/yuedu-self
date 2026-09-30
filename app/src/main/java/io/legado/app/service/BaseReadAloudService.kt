@@ -11,6 +11,7 @@ import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.AudioManager
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.PowerManager
@@ -38,6 +39,9 @@ import io.legado.app.help.MediaHelp
 import io.legado.app.help.ai.AiReadAloudRoleService
 import io.legado.app.help.ai.AiReadAloudRoleState
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.readaloud.offline.AudioPrefetchLifecycle
+import io.legado.app.help.readaloud.offline.AudioPrefetchPlayback
+import io.legado.app.help.readaloud.offline.ReadAloudAssemblyState
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookChapter
 import io.legado.app.help.coroutine.Coroutine
@@ -145,6 +149,10 @@ abstract class BaseReadAloudService : BaseService(),
     var pageChanged = false
     private var toLast = false
     var paragraphStartPos = 0
+    private val prefetchService = AudioPrefetchPlayback.lifecycle.createService()
+    private val assemblyState = ReadAloudAssemblyState<TextChapter>()
+    private var prefetchPlaybackWork: AudioPrefetchLifecycle.Work? = null
+    private var prefetchResumeIntent: PendingIntent? = null
 
     /** P1/B1-③：段中触发时是否对齐到句首（装配时读取一次，全程生效） */
     @Volatile
@@ -215,12 +223,15 @@ abstract class BaseReadAloudService : BaseService(),
         }
     }
 
-    fun observeLiveBus() {
+    open fun observeLiveBus() {
         observeEvent<Bundle>(EventBus.READ_ALOUD_PLAY) {
             val play = it.getBoolean("play")
             val pageIndex = it.getInt("pageIndex")
             val startPos = it.getInt("startPos")
-            newReadAloud(play, pageIndex, startPos)
+            dispatchPlayback(
+                it.getString(AudioPrefetchPlayback.REQUEST),
+                it.getString(AudioPrefetchPlayback.CONTINUATION)
+            ) { work -> newReadAloud(play, pageIndex, startPos, work) }
         }
         observeSharedPreferences { _, key ->
             when (key) {
@@ -233,6 +244,10 @@ abstract class BaseReadAloudService : BaseService(),
     }
 
     override fun onDestroy() {
+        assemblyState.clear()
+        AudioPrefetchPlayback.lifecycle.destroy(prefetchService)
+        prefetchResumeIntent?.cancel()
+        prefetchResumeIntent = null
         super.onDestroy()
         if (useWakeLock) {
             wakeLock.release()
@@ -255,14 +270,40 @@ abstract class BaseReadAloudService : BaseService(),
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            IntentAction.play -> newReadAloud(
-                intent.getBooleanExtra("play", true),
-                intent.getIntExtra("pageIndex", ReadBook.durPageIndex),
-                intent.getIntExtra("startPos", 0)
-            )
+            IntentAction.play -> dispatchPlayback(
+                intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+            ) { work ->
+                newReadAloud(
+                    intent.getBooleanExtra("play", true),
+                    intent.getIntExtra("pageIndex", ReadBook.durPageIndex),
+                    intent.getIntExtra("startPos", 0), work
+                )
+            }
 
             IntentAction.pause -> pauseReadAloud()
-            IntentAction.resume -> resumeReadAloud()
+            IntentAction.resume -> {
+                val offer = intent.getStringExtra(AudioPrefetchPlayback.RESUME_OFFER)
+                val work = if (offer != null) {
+                    if (flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY) == 0 &&
+                        AudioPrefetchPlayback.lifecycle.acceptResume(
+                            prefetchService, offer, ReadBook.book?.bookUrl.orEmpty()
+                        )
+                    ) AudioPrefetchPlayback.lifecycle.capture(prefetchService, ReadBook.book?.bookUrl.orEmpty())
+                    else null
+                } else null
+                if (offer != null && work == null) {
+                    return super.onStartCommand(intent, flags, startId)
+                }
+                if (offer != null) {
+                    resumePlayback(work)
+                } else {
+                    dispatchPlayback(
+                        intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                        intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                    ) { resumePlayback(it) }
+                }
+            }
             IntentAction.upTtsSpeechRate -> upSpeechRate(true)
             IntentAction.prevParagraph -> prevP()
             IntentAction.nextParagraph -> nextP()
@@ -274,7 +315,11 @@ abstract class BaseReadAloudService : BaseService(),
                 intent.getIntExtra("minute", 0),
                 intent.getIntExtra("chapters", 0)
             )
-            IntentAction.stop -> stopSelf()
+            IntentAction.stop -> {
+                assemblyState.clear()
+                AudioPrefetchPlayback.lifecycle.pause(prefetchService)
+                stopSelf()
+            }
             IntentAction.reInitTts -> onReInitTts()
 
             IntentAction.moveTo -> {
@@ -283,24 +328,111 @@ abstract class BaseReadAloudService : BaseService(),
                 val expectedChapter = intent.getIntExtra("expectedChapterIndex", ReadBook.durChapterIndex)
                 val chapterPosition = intent.getIntExtra("chapterPosition", 0)
                 val play = intent.getBooleanExtra("play", BaseReadAloudService.isPlay())
-                moveToCueExt(expectedChapter, chapterPosition, play)
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { moveToCueExt(expectedChapter, chapterPosition, play, it) }
             }
 
             IntentAction.selectChapter -> {
                 // 兜底：播放面板选章（原 action 无处理分支被静默丢弃，朗读中选章完全无效）
                 val chapterIndex = intent.getIntExtra("chapterIndex", ReadBook.durChapterIndex)
                 val continuePlayback = intent.getBooleanExtra("continuePlayback", BaseReadAloudService.isPlay())
-                moveToChapterExt(chapterIndex, continuePlayback)
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { moveToChapterExt(chapterIndex, continuePlayback, it) }
             }
 
             IntentAction.playFromPosition -> {
                 // 兜底：选句朗读（原 action 无处理分支被静默丢弃）：跳章后从 chapterPosition 起播
                 val chapterIndex = intent.getIntExtra("chapterIndex", ReadBook.durChapterIndex)
                 val chapterPosition = intent.getIntExtra("chapterPosition", 0)
-                playFromPositionExt(chapterIndex, chapterPosition)
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { playFromPositionExt(chapterIndex, chapterPosition, it) }
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    /** 带身份的投递解析失败即丢弃，不能退化成无授权的普通播放。 */
+    protected fun dispatchPlayback(
+        request: String?, continuation: String?, flags: Int = 0,
+        action: (AudioPrefetchLifecycle.Work?) -> Unit
+    ) {
+        val work = prefetchWork(request, continuation, flags)
+        if ((request != null || continuation != null) && work == null) return
+        action(work)
+    }
+
+    private fun prefetchWork(
+        request: String?, continuation: String? = null, flags: Int = 0
+    ): AudioPrefetchLifecycle.Work? {
+        if (flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY) != 0) return null
+        val bookUrl = ReadBook.book?.bookUrl.orEmpty()
+        if (request != null) {
+            if (!AudioPrefetchPlayback.lifecycle.acceptUserPlay(prefetchService, request, bookUrl)) return null
+            return AudioPrefetchPlayback.lifecycle.capture(prefetchService, bookUrl)
+        }
+        return AudioPrefetchPlayback.lifecycle.resolveContinuation(prefetchService, continuation, bookUrl)
+    }
+
+    /** 媒体控制回调是新的用户播放动作；焦点/来电恢复仍走无授权的 resumeReadAloud。 */
+    private fun resumeFromUser() {
+        val request = AudioPrefetchPlayback.lifecycle.requestUserPlay(
+            prefetchService, ReadBook.book?.bookUrl.orEmpty()
+        ) ?: return
+        val work = prefetchWork(request) ?: return
+        if (onUserResumeFromMedia(work)) return
+        resumePlayback(work)
+    }
+
+    /**
+     * 子服务可以接管媒体控件发起的主动恢复。
+     *
+     * 返回 true 表示已经消费 [work]；默认行为保持原有文本朗读装配。
+     */
+    protected open fun onUserResumeFromMedia(work: AudioPrefetchLifecycle.Work): Boolean = false
+
+    /** 正在装配时的恢复重新装配当前章，不用上一章的音频或窗口代替。 */
+    private fun resumePlayback(work: AudioPrefetchLifecycle.Work?) {
+        val prepared = assemblyState.prepared
+        if (prepared != null && prepared === textChapter &&
+            prepared.chapter.bookUrl == ReadBook.book?.bookUrl &&
+            prepared.chapter.index == ReadBook.durChapterIndex && contentList.isNotEmpty()
+        ) {
+            resumeReadAloud()
+            prefetchAssembled(work, prepared)
+        } else {
+            newReadAloudAtChapterPosition(ReadBook.durChapterPos, work)
+        }
+    }
+
+    protected fun prefetchAssembled(
+        work: AudioPrefetchLifecycle.Work?,
+        bookUrl: String,
+        chapterIndex: Int,
+        chapterCount: Int
+    ) {
+        if (!AudioPrefetchPlayback.lifecycle.isCurrent(work)) return
+        prefetchPlaybackWork = work
+        AudioPrefetchPlayback.lifecycle.assembled(
+            work, bookUrl, chapterIndex, chapterCount
+        )
+    }
+
+    private fun prefetchAssembled(work: AudioPrefetchLifecycle.Work?, chapter: TextChapter) {
+        if (pause || contentList.isEmpty() || !chapter.isCompleted ||
+            chapter !== textChapter || ReadBook.book?.bookUrl != chapter.chapter.bookUrl
+        ) return
+        prefetchAssembled(
+            work = work,
+            bookUrl = chapter.chapter.bookUrl,
+            chapterIndex = chapter.chapter.index,
+            chapterCount = chapter.chaptersSize
+        )
     }
 
     /** 引擎内重建（AD-02）：同服务类型切换时不下发 STOP，由子类重建引擎（系统 TTS=clearTTS+initTts） */
@@ -363,16 +495,18 @@ abstract class BaseReadAloudService : BaseService(),
      * 章级跳转（P1-12/selectChapter 兜底）：跳章后按 play 续播/暂停；同章仅切换播放态。
      * 加载完成后经 newReadAloud 重新装配（对齐 IntentAction.play 语义）
      */
-    private fun moveToChapterExt(targetIndex: Int, play: Boolean) {
+    private fun moveToChapterExt(
+        targetIndex: Int, play: Boolean, prefetchWork: AudioPrefetchLifecycle.Work?
+    ) {
         if (targetIndex == ReadBook.durChapterIndex) {
-            if (play) resumeReadAloud() else pauseReadAloud()
+            if (play) resumePlayback(prefetchWork) else pauseReadAloud()
             return
         }
         playStop()
         if (play) resumeReadAloudInternal()
         ReadBook.openChapter(targetIndex.coerceAtLeast(0)) {
             if (play) {
-                ReadBook.readAloud(true)
+                ReadBook.readAloud(true, prefetchContinuation = prefetchWork?.continuationId)
             } else {
                 // 暂停态跳章：仅置装配标记，resume 时重装配新章
                 pageChanged = true
@@ -383,22 +517,25 @@ abstract class BaseReadAloudService : BaseService(),
     /**
      * cue 定位兜底（P1-12）：同章按 chapterPosition 精确装配；跨章 openChapter 后按位装配
      */
-    private fun moveToCueExt(targetChapter: Int, chapterPosition: Int, play: Boolean) {
+    private fun moveToCueExt(
+        targetChapter: Int, chapterPosition: Int, play: Boolean,
+        prefetchWork: AudioPrefetchLifecycle.Work?
+    ) {
         playStop()
         if (targetChapter == ReadBook.durChapterIndex) {
             val chapter = ReadBook.curTextChapter
             if (play && chapter != null && chapter.isCompleted && chapterPosition > 0) {
                 resumeReadAloudInternal()
-                newReadAloudAtChapterPosition(chapterPosition)
+                newReadAloudAtChapterPosition(chapterPosition, prefetchWork)
             } else {
-                if (play) resumeReadAloud() else pauseReadAloud()
+                if (play) resumePlayback(prefetchWork) else pauseReadAloud()
             }
             return
         }
         if (play) resumeReadAloudInternal()
         ReadBook.openChapter(targetChapter.coerceAtLeast(0), durChapterPos = chapterPosition) {
             if (play) {
-                newReadAloudAtChapterPosition(chapterPosition)
+                newReadAloudAtChapterPosition(chapterPosition, prefetchWork)
             } else {
                 pageChanged = true
             }
@@ -408,43 +545,63 @@ abstract class BaseReadAloudService : BaseService(),
     /**
      * 选句朗读兜底：跨章先 openChapter（durChapterPos 定位），完成后从 chapterPosition 起播
      */
-    private fun playFromPositionExt(chapterIndex: Int, chapterPosition: Int) {
+    private fun playFromPositionExt(
+        chapterIndex: Int, chapterPosition: Int,
+        prefetchWork: AudioPrefetchLifecycle.Work?
+    ) {
         playStop()
         resumeReadAloudInternal()
         if (chapterIndex != ReadBook.durChapterIndex) {
             ReadBook.openChapter(chapterIndex, durChapterPos = chapterPosition) {
-                newReadAloudAtChapterPosition(chapterPosition)
+                newReadAloudAtChapterPosition(chapterPosition, prefetchWork)
             }
         } else {
-            newReadAloudAtChapterPosition(chapterPosition)
+            // 同章选句被暂停或被系统打断后，沿用该位置恢复，而不是回退到页首。
+            synchronized(ReadBook) {
+                ReadBook.durChapterPos = chapterPosition.coerceAtLeast(0)
+                // 同章定位只更新阅读进度，避免重复触发书源章节保存回调。
+                ReadBook.saveRead(true)
+            }
+            newReadAloudAtChapterPosition(chapterPosition, prefetchWork)
         }
     }
 
     /** 按"章内字符位置"装配并起播：换算页号与页内偏移（对齐 newReadAloud 的 startPos 语义） */
-    private fun newReadAloudAtChapterPosition(chapterPosition: Int) {
+    private fun newReadAloudAtChapterPosition(
+        chapterPosition: Int,
+        prefetchWork: AudioPrefetchLifecycle.Work?
+    ) {
         val chapter = ReadBook.curTextChapter
         if (chapter == null || !chapter.isCompleted) {
             // 章未就绪：退化为整章起播
-            ReadBook.readAloud(true)
+            ReadBook.readAloud(true, prefetchContinuation = prefetchWork?.continuationId)
             return
         }
         val pageIndex = chapter.getPageIndexByCharIndex(chapterPosition).coerceAtLeast(0)
-        newReadAloud(true, pageIndex, (chapterPosition - chapter.getReadLength(pageIndex)).coerceAtLeast(0))
+        newReadAloud(true, pageIndex, (chapterPosition - chapter.getReadLength(pageIndex)).coerceAtLeast(0), prefetchWork)
     }
 
-    private fun newReadAloud(play: Boolean, pageIndex: Int, startPos: Int) {
+    private fun newReadAloud(
+        play: Boolean, pageIndex: Int, startPos: Int,
+        prefetchWork: AudioPrefetchLifecycle.Work?
+    ) {
+        // 迟到的跳章回调不可抢掉当前装配槽位；提交时还需再次复核。
+        if (prefetchWork != null && !AudioPrefetchPlayback.lifecycle.isCurrent(prefetchWork)) return
+        val assemblyRequest = assemblyState.begin()
+        preheatJob?.cancel()
+        val textChapter = ReadBook.curTextChapter ?: return
+        val book = ReadBook.book ?: return
+        val readToLast = toLast
+        if (!play) AudioPrefetchPlayback.lifecycle.pause(prefetchService)
         execute(executeContext = IO) {
-            this@BaseReadAloudService.pageIndex = pageIndex
-            textChapter = ReadBook.curTextChapter
-            val textChapter = textChapter ?: return@execute
             if (!textChapter.isCompleted) {
                 return@execute
             }
-            readAloudNumber = textChapter.getReadLength(pageIndex) + startPos
-            readAloudByPage = getPrefBoolean(PreferKey.readAloudByPage)
+            var readAloudNumber = textChapter.getReadLength(pageIndex) + startPos
+            val readAloudByPage = getPrefBoolean(PreferKey.readAloudByPage)
             // P1/B1-③：段中触发对齐句首偏好（每次装配读取一次）
-            alignSentenceStart = AppConfig.readAloudAlignSentenceStart
-            contentList = textChapter.getNeedReadAloud(0, readAloudByPage, 0)
+            val alignSentenceStart = AppConfig.readAloudAlignSentenceStart
+            val contentList = textChapter.getNeedReadAloud(0, readAloudByPage, 0)
                 .split("\n")
                 .filter { it.isNotEmpty() }
             var pos = startPos
@@ -456,13 +613,12 @@ abstract class BaseReadAloudService : BaseService(),
                     pos = tmp
                 }
             }
-            nowSpeak = textChapter.getParagraphNum(readAloudNumber + 1, readAloudByPage) - 1
-            if (!readAloudByPage && startPos == 0 && !toLast) {
+            var nowSpeak = textChapter.getParagraphNum(readAloudNumber + 1, readAloudByPage) - 1
+            if (!readAloudByPage && startPos == 0 && !readToLast) {
                 pos = page.chapterPosition -
                         textChapter.paragraphs[nowSpeak].chapterPosition
             }
-            if (toLast) {
-                toLast = false
+            if (readToLast) {
                 readAloudNumber = textChapter.getLastParagraphPosition()
                 nowSpeak = contentList.lastIndex
                 if (page.paragraphs.size == 1) {
@@ -470,11 +626,27 @@ abstract class BaseReadAloudService : BaseService(),
                             textChapter.paragraphs[nowSpeak].chapterPosition
                 }
             }
-            paragraphStartPos = pos
-            // E1/P0-5：AI 分镜预生成缓存预热（fire-and-forget，不阻塞起播；AI 关闭/缓存命中时内部短路）
-            preheatAiRoleCache(ReadBook.book, textChapter, contentList)
             launch(Main) {
+                // IO 仅计算局部结果；暂停、新装配、换书或失效工作均不能写回播放器。
+                if (ReadBook.book?.bookUrl != book.bookUrl ||
+                    ReadBook.curTextChapter !== textChapter ||
+                    (prefetchWork != null && play &&
+                        !AudioPrefetchPlayback.lifecycle.isCurrent(prefetchWork))
+                ) return@launch
+                if (!assemblyState.complete(assemblyRequest, textChapter)) return@launch
+                this@BaseReadAloudService.pageIndex = pageIndex
+                this@BaseReadAloudService.textChapter = textChapter
+                this@BaseReadAloudService.readAloudNumber = readAloudNumber
+                this@BaseReadAloudService.readAloudByPage = readAloudByPage
+                this@BaseReadAloudService.alignSentenceStart = alignSentenceStart
+                this@BaseReadAloudService.contentList = contentList
+                this@BaseReadAloudService.nowSpeak = nowSpeak
+                paragraphStartPos = pos
+                if (readToLast) toLast = false
+                // 当前播放章的 AI 标注预热不阻塞起播；暂停态装配不触发。
+                if (play) preheatAiRoleCache(book, textChapter, contentList)
                 if (play) play() else pageChanged = true
+                if (play) prefetchAssembled(prefetchWork, textChapter)
             }
         }.onError {
             AppLog.put("启动朗读出错\n${it.localizedMessage}", it, true)
@@ -500,6 +672,9 @@ abstract class BaseReadAloudService : BaseService(),
 
     @CallSuper
     open fun pauseReadAloud(abandonFocus: Boolean = true) {
+        AudioPrefetchPlayback.lifecycle.pause(prefetchService)
+        assemblyState.cancelPending()
+        preheatJob?.cancel()
         if (useWakeLock) {
             wakeLock.release()
             wifiLock?.release()
@@ -558,7 +733,10 @@ abstract class BaseReadAloudService : BaseService(),
             play()
         } else {
             toLast = true
-            ReadBook.moveToPrevChapter(true)
+            ReadBook.moveToPrevChapter(
+                true, fromReadAloud = true,
+                prefetchContinuation = prefetchPlaybackWork?.continuationId
+            )
         }
     }
 
@@ -732,7 +910,7 @@ abstract class BaseReadAloudService : BaseService(),
         )
         mediaSessionCompat.setCallback(object : MediaSessionCompat.Callback() {
             override fun onPlay() {
-                resumeReadAloud()
+                resumeFromUser()
             }
 
             override fun onPause() {
@@ -756,6 +934,8 @@ abstract class BaseReadAloudService : BaseService(),
             }
 
             override fun onStop() {
+                assemblyState.clear()
+                AudioPrefetchPlayback.lifecycle.pause(prefetchService)
                 stopSelf()
             }
 
@@ -821,7 +1001,7 @@ abstract class BaseReadAloudService : BaseService(),
             AudioManager.AUDIOFOCUS_GAIN -> {
                 if (needResumeOnAudioFocusGain) {
                     AppLog.put("音频焦点获得,继续朗读")
-                    resumeReadAloud()
+                    resumePlayback(null)
                 } else {
                     AppLog.put("音频焦点获得")
                 }
@@ -848,7 +1028,7 @@ abstract class BaseReadAloudService : BaseService(),
     }
 
     private fun upReadAloudNotification() {
-        upNotificationJob = execute {
+        upNotificationJob = execute(context = Main) {
             try {
                 upMediaMetadata()
                 val notification = createNotification()
@@ -906,7 +1086,7 @@ abstract class BaseReadAloudService : BaseService(),
             builder.addAction(
                 R.drawable.ic_play_24dp,
                 getString(R.string.resume),
-                aloudServicePendingIntent(IntentAction.resume)
+                prefetchResumePendingIntent()
             )
         } else {
             builder.addAction(
@@ -941,7 +1121,7 @@ abstract class BaseReadAloudService : BaseService(),
      * 更新通知
      */
     override fun startForegroundNotification() {
-        execute {
+        execute(context = Main) {
             try {
                 upMediaMetadata()
                 val notification = createNotification()
@@ -956,17 +1136,43 @@ abstract class BaseReadAloudService : BaseService(),
 
     abstract fun aloudServicePendingIntent(actionStr: String): PendingIntent?
 
+    private fun prefetchResumePendingIntent(): PendingIntent? {
+        prefetchResumeIntent?.cancel()
+        prefetchResumeIntent = null
+        val offer = AudioPrefetchPlayback.lifecycle.offerResume(
+            prefetchService, ReadBook.book?.bookUrl.orEmpty()
+        ) ?: return null
+        val intent = Intent(this, javaClass).apply {
+            action = IntentAction.resume
+            // extras 不参与 PendingIntent 身份匹配；每次按钮必须保持自己的票据。
+            setData(Uri.Builder().scheme("legado").authority("read-aloud-resume")
+                .appendPath(offer).build())
+            putExtra(AudioPrefetchPlayback.RESUME_OFFER, offer)
+        }
+        return PendingIntent.getService(
+            this, 17041, intent, PendingIntent.FLAG_IMMUTABLE
+        ).also { prefetchResumeIntent = it }
+    }
+
     open fun prevChapter() {
         toLast = false
         resumeReadAloudInternal()
-        ReadBook.moveToPrevChapter(true, toLast = false)
+        ReadBook.moveToPrevChapter(
+            true, toLast = false, fromReadAloud = true,
+            prefetchContinuation = prefetchPlaybackWork?.continuationId
+        )
     }
 
     open fun nextChapter() {
         ReadBook.upReadTime()
         AppLog.putDebug("${ReadBook.curTextChapter?.chapter?.title} 朗读结束跳转下一章并朗读")
         resumeReadAloudInternal()
-        if (!ReadBook.moveToNextChapter(true)) {
+        if (!ReadBook.moveToNextChapter(
+                true, fromReadAloud = true,
+                prefetchContinuation = prefetchPlaybackWork?.continuationId
+            )
+        ) {
+            AudioPrefetchPlayback.lifecycle.pause(prefetchService)
             stopSelf()
         }
     }
@@ -1025,7 +1231,7 @@ abstract class BaseReadAloudService : BaseService(),
                 TelephonyManager.CALL_STATE_IDLE -> {
                     if (needResumeOnCallStateIdle) {
                         AppLog.put("来电结束,继续朗读")
-                        resumeReadAloud()
+                        resumePlayback(null)
                     } else {
                         AppLog.put("来电结束")
                     }

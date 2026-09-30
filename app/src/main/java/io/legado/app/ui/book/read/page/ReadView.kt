@@ -492,7 +492,7 @@ class ReadView(context: Context, attrs: AttributeSet) :
                 if (BaseReadAloudService.isPlay()) {
                     ReadAloud.pause(context)
                 } else {
-                    ReadAloud.resume(context)
+                    ReadAloud.resume(context, userInitiated = true)
                 }
             }
         }

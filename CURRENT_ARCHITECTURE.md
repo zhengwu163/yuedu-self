@@ -70,13 +70,27 @@ ReadAloudPlayerPanel → ReadAloudSpeechPlanner → 面板显示
 - `AiReadAloudRoleCache` 有正文 hash、segmentsJson 和分析状态，
   但分析命中维度还需绑定物理章节身份及协议/切分器版本。
 - `HttpReadAloudService.preDownloadAudios()` 只预取下一章前十个非空段，
-  不等于后续 2–3 个完整章节。
+  不等于当前主动播放书籍后续 3 个完整章节的离线准备。
 - HTTP 队列异常分支会 `pauseReadAloud()` 后返回；单段失败可能中断连续收听。
 - 部分分支写静音占位。静音不能证明正文已经生成，更不能计为完整离线下载。
 - `TtsPrebuildManager` 已有进度、有限重试、临时文件提交及保留键文件；
   主队列仍在内存，保留键有期限，不能保证用户主动下载永久免于滚动淘汰。
 - HTTP 文件和 Media3 SimpleCache 位于 `cacheDir`。Android 可回收 cacheDir；
   用户明确保留的离线下载需要应用持久文件目录及完整 manifest。
+
+### 开发分支的播放授权接线
+
+`AudioPrefetchLifecycle` 已接入阅读按钮、媒体键、通知恢复与 Service 装配，
+由用户请求、Service 所属权和单次 continuation 隔离迟到工作。`ChapterReadAloudRequest`
+按书籍、章节及加载代次传递跨章续播；`ReadAloudAssemblyState` 隔离尚未提交的装配结果。
+通知票据签发和发布在主线程串行，显式身份解析失败的投递不会作为普通播放执行。
+目标章就绪后起播包含最后一章，书末停止仍由 Service 播放完成后的推进负责。
+暂停会撤销预缓存授权，但不会丢弃已完成的本地朗读装配；同章选句位置在
+`ReadBook` 锁内更新并通过现有 `saveRead(true)` 保存，恢复从章内字符位置重新装配。
+
+这部分只控制内存授权及播放入口，不生成整章离线音频，也未接入持久下载队列。
+另有已确认缺口：脱离阅读跟随后，跨章仍依赖 `ReadBook` 可视章节推进；
+统一文本/播放计划阶段需要独立朗读游标，并补真实跨章行为测试。
 - 已有 `DownloadState` / `DownloadService` 展示 Room 恢复思路；它们是现有下载业务，
   不应直接把音频任务混入其表而破坏语义。
 

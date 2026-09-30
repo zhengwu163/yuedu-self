@@ -74,9 +74,10 @@ object ReadAloudRolePreprocessor {
 
     fun process(
         paragraphs: List<String>,
-        paragraphOffset: Int = 0
+        paragraphOffset: Int = 0,
+        frozenRules: FrozenReadAloudPreprocessRules? = null
     ): ReadAloudRolePreprocessResult {
-        val config = loadRuleConfig()
+        val config = loadRuleConfig(frozenRules)
         if (paragraphs.isEmpty()) {
             return ReadAloudRolePreprocessResult(VERSION, emptyList())
         }
@@ -241,9 +242,9 @@ object ReadAloudRolePreprocessor {
         )
     }
 
-    private fun loadRuleConfig(): RuleConfig {
+    private fun loadRuleConfig(frozenRules: FrozenReadAloudPreprocessRules?): RuleConfig {
         return runCatching {
-            val config = ReadAloudPreprocessRuleConfig.current()
+            val config = frozenRules?.config ?: ReadAloudPreprocessRuleConfig.current()
             RuleConfig(
                 quotePairs = config.quotePairs
                     .mapNotNull { pair ->

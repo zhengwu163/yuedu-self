@@ -1,8 +1,10 @@
 package io.legado.app.help.readaloud.role
 
+import androidx.annotation.Keep
 import io.legado.app.help.config.AppConfig
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Collections
 
 data class ReadAloudQuotePair(
     val open: String,
@@ -21,6 +23,24 @@ data class ReadAloudPreprocessRuleConfig(
     val soundEffectExcludePatterns: List<String> = defaultSoundEffectExcludePatterns,
     val soundEffectContextChars: Int = 28
 ) {
+
+    /**
+     * 规则进入章节快照前必须复制集合；之后设置页修改不会改变已冻结的解析语义。
+     */
+    fun freeze(): FrozenReadAloudPreprocessRules {
+        val frozen = copy(
+            quotePairs = Collections.unmodifiableList(quotePairs.toList()),
+            thoughtCuePatterns = Collections.unmodifiableList(thoughtCuePatterns.toList()),
+            soundEffectCuePatterns = Collections.unmodifiableList(soundEffectCuePatterns.toList()),
+            soundEffectExcludePatterns = Collections.unmodifiableList(soundEffectExcludePatterns.toList())
+        )
+        return FrozenReadAloudPreprocessRules(
+            version = "rules-${
+                frozen.toJsonString().sha256()
+            }",
+            config = frozen
+        )
+    }
 
     fun toJsonString(): String {
         return JSONObject().apply {
@@ -115,4 +135,20 @@ data class ReadAloudPreprocessRuleConfig(
             return result.distinct()
         }
     }
+}
+
+@Keep
+data class FrozenReadAloudPreprocessRules(
+    val version: String,
+    val config: ReadAloudPreprocessRuleConfig
+) {
+    init {
+        require(version.isNotBlank())
+    }
+}
+
+private fun String.sha256(): String {
+    return java.security.MessageDigest.getInstance("SHA-256")
+        .digest(toByteArray(Charsets.UTF_8))
+        .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }

@@ -30,6 +30,9 @@ import io.legado.app.help.config.AppConfig
 import io.legado.app.help.config.ReadBookConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.globalExecutor
+import io.legado.app.help.readaloud.offline.AudioPrefetchPlayback
+import io.legado.app.help.readaloud.offline.ChapterReadAloudRequest
+import io.legado.app.help.readaloud.novel.NovelAudioPreparationCoordinator
 import io.legado.app.model.localBook.TextFile
 import io.legado.app.model.webBook.WebBook
 import io.legado.app.service.BaseReadAloudService
@@ -72,7 +75,15 @@ import kotlin.math.min
 
 @Suppress("MemberVisibilityCanBePrivate")
 object ReadBook : CoroutineScope by MainScope() {
+    @Volatile
     var book: Book? = null
+        @Synchronized set(value) {
+            if (field?.bookUrl != value?.bookUrl) chapterRequests.clear()
+            // 不依赖 isRun：换书可能发生在用户请求已发出、Service 尚未创建期间。
+            io.legado.app.help.readaloud.offline.AudioPrefetchPlayback.lifecycle
+                .bookChanged(field?.bookUrl, value?.bookUrl)
+            field = value
+        }
     var callBack: WeakReference<CallBack>? = null
     var inBookshelf = false
     var chapterSize = 0
@@ -102,8 +113,7 @@ object ReadBook : CoroutineScope by MainScope() {
     private val curChapterLoadingLock = Mutex()
     private val nextChapterLoadingLock = Mutex()
     var readStartTime: Long = System.currentTimeMillis()
-    @Volatile
-    private var readAloudPendingLoadChapterIndex = -1
+    private val chapterRequests = AudioPrefetchPlayback.lifecycle.chapterRequests
 
     /* 跳转进度前进度记录 */
     var lastBookProgress: BookProgress? = null
@@ -143,6 +153,7 @@ object ReadBook : CoroutineScope by MainScope() {
      * 非朗读来源的导航（用户手动翻页/跳转）→ 脱离跟随（取代原 1500ms 时间窗启发式）。
      */
     private fun markReadAloudUserNavigation(fromReadAloud: Boolean) {
+        if (!fromReadAloud) chapterRequests.clear()
         if (!fromReadAloud && BaseReadAloudService.isRun) {
             SpeechFollowState.detachForManualNavigation()
         }
@@ -333,6 +344,7 @@ object ReadBook : CoroutineScope by MainScope() {
     }
 
     fun clearTextChapter() {
+        chapterRequests.clear()
         clearExpiredChapterLoadingJob(true)
         prevTextChapter = null
         curTextChapter = null
@@ -624,7 +636,8 @@ object ReadBook : CoroutineScope by MainScope() {
     fun moveToNextChapter(
         upContent: Boolean,
         upContentInPlace: Boolean = true,
-        fromReadAloud: Boolean = false
+        fromReadAloud: Boolean = false,
+        prefetchContinuation: String? = null
     ): Boolean {
         if (durChapterIndex < simulatedChapterSize - 1) {
             markReadAloudUserNavigation(fromReadAloud)
@@ -637,13 +650,14 @@ object ReadBook : CoroutineScope by MainScope() {
             prevTextChapter = curTextChapter
             curTextChapter = loadedNextChapter
             nextTextChapter = null
+            val readAloudRequest = beginChapterReadAloud(fromReadAloud, prefetchContinuation)
             if (curTextChapter == null) {
                 AppLog.putDebug("moveToNextChapter-章节未加载,开始加载")
-                if (fromReadAloud) {
-                    readAloudPendingLoadChapterIndex = durChapterIndex
-                }
                 if (upContentInPlace) callBack?.get()?.upContent()
-                loadContent(durChapterIndex, upContent, resetPageOffset = false)
+                loadContent(
+                    durChapterIndex, upContent, resetPageOffset = false,
+                    readAloudRequest = readAloudRequest
+                )
             } else if (upContent && upContentInPlace) {
                 AppLog.putDebug("moveToNextChapter-章节已加载,刷新视图")
                 callBack?.get()?.upContent()
@@ -652,7 +666,11 @@ object ReadBook : CoroutineScope by MainScope() {
             saveRead()
             callBack?.get()?.upMenuView()
             AppLog.putDebug("moveToNextChapter-curPageChanged()")
-            curPageChanged(fromReadAloud = fromReadAloud)
+            if (loadedNextChapter != null) {
+                completeCachedChapterReadAloud(readAloudRequest)
+            } else {
+                curPageChanged()
+            }
             return true
         } else {
             AppLog.putDebug("跳转下一章失败,没有下一章")
@@ -663,7 +681,8 @@ object ReadBook : CoroutineScope by MainScope() {
     suspend fun moveToNextChapterAwait(
         upContent: Boolean,
         upContentInPlace: Boolean = true,
-        fromReadAloud: Boolean = false
+        fromReadAloud: Boolean = false,
+        prefetchContinuation: String? = null
     ): Boolean {
         if (durChapterIndex < simulatedChapterSize - 1) {
             markReadAloudUserNavigation(fromReadAloud)
@@ -676,13 +695,14 @@ object ReadBook : CoroutineScope by MainScope() {
             prevTextChapter = curTextChapter
             curTextChapter = loadedNextChapter
             nextTextChapter = null
+            val readAloudRequest = beginChapterReadAloud(fromReadAloud, prefetchContinuation)
             if (curTextChapter == null) {
                 AppLog.putDebug("moveToNextChapter-章节未加载,开始加载")
-                if (fromReadAloud) {
-                    readAloudPendingLoadChapterIndex = durChapterIndex
-                }
                 if (upContentInPlace) callBack?.get()?.upContentAwait()
-                loadContentAwait(durChapterIndex, upContent, resetPageOffset = false)
+                loadContentAwait(
+                    durChapterIndex, upContent, resetPageOffset = false,
+                    readAloudRequest = readAloudRequest
+                )
             } else if (upContent && upContentInPlace) {
                 AppLog.putDebug("moveToNextChapter-章节已加载,刷新视图")
                 callBack?.get()?.upContentAwait()
@@ -691,7 +711,10 @@ object ReadBook : CoroutineScope by MainScope() {
             saveRead()
             callBack?.get()?.upMenuView()
             AppLog.putDebug("moveToNextChapter-curPageChanged()")
-            curPageChanged(fromReadAloud = fromReadAloud)
+            // 未缓存路径已在对应加载完成时消费请求，不能在 await 返回后再次起播。
+            if (loadedNextChapter != null) {
+                withContext(Main) { completeCachedChapterReadAloud(readAloudRequest) }
+            }
             return true
         } else {
             AppLog.putDebug("跳转下一章失败,没有下一章")
@@ -703,7 +726,8 @@ object ReadBook : CoroutineScope by MainScope() {
         upContent: Boolean,
         toLast: Boolean = true,
         upContentInPlace: Boolean = true,
-        fromReadAloud: Boolean = false
+        fromReadAloud: Boolean = false,
+        prefetchContinuation: String? = null
     ): Boolean {
         if (durChapterIndex > 0) {
             markReadAloudUserNavigation(fromReadAloud)
@@ -716,19 +740,24 @@ object ReadBook : CoroutineScope by MainScope() {
             nextTextChapter = curTextChapter
             curTextChapter = loadedPrevChapter
             prevTextChapter = null
+            val readAloudRequest = beginChapterReadAloud(fromReadAloud, prefetchContinuation)
             if (curTextChapter == null) {
-                if (fromReadAloud) {
-                    readAloudPendingLoadChapterIndex = durChapterIndex
-                }
                 if (upContentInPlace) callBack?.get()?.upContent()
-                loadContent(durChapterIndex, upContent, resetPageOffset = false)
+                loadContent(
+                    durChapterIndex, upContent, resetPageOffset = false,
+                    readAloudRequest = readAloudRequest
+                )
             } else if (upContent && upContentInPlace) {
                 callBack?.get()?.upContent()
             }
             loadContent(durChapterIndex.minus(1), upContent, false)
             saveRead()
             callBack?.get()?.upMenuView()
-            curPageChanged(fromReadAloud = fromReadAloud)
+            if (loadedPrevChapter != null) {
+                completeCachedChapterReadAloud(readAloudRequest)
+            } else {
+                curPageChanged()
+            }
             return true
         } else {
             return false
@@ -786,10 +815,41 @@ object ReadBook : CoroutineScope by MainScope() {
         }
     }
 
-    /**
-     * 当前页面变化
-     */
-    private fun curPageChanged(pageChanged: Boolean = false, fromReadAloud: Boolean = false) {
+    @Synchronized
+    private fun beginChapterReadAloud(
+        fromReadAloud: Boolean, continuation: String?
+    ): ChapterReadAloudRequest.Request? {
+        chapterRequests.clear()
+        val bookUrl = book?.bookUrl ?: return null
+        return if (fromReadAloud) chapterRequests.begin(bookUrl, durChapterIndex, continuation) else null
+    }
+
+    @Synchronized
+    private fun completeCachedChapterReadAloud(request: ChapterReadAloudRequest.Request?) {
+        chapterReadAloudReady(chapterRequests.completeCached(request, book?.bookUrl.orEmpty(), durChapterIndex))
+    }
+
+    @Synchronized
+    private fun completeChapterReadAloud(bookUrl: String, index: Int, generation: Long) {
+        if (book?.bookUrl != bookUrl || durChapterIndex != index) return
+        chapterReadAloudReady(chapterRequests.complete(bookUrl, index, generation))
+    }
+
+    private fun chapterReadAloudReady(request: ChapterReadAloudRequest.Request?) {
+        // 正文可复用，朗读意图不可复用；已撤销的预取身份也不得引发迟到续播。
+        val continuation = request?.continuation
+        val canContinue = request != null && BaseReadAloudService.isPlay() &&
+            (continuation == null ||
+                AudioPrefetchPlayback.lifecycle.continuation(request.bookUrl) == continuation)
+        curPageChanged(fromReadAloud = canContinue, prefetchContinuation = continuation)
+    }
+
+    /** 当前页面变化 */
+    private fun curPageChanged(
+        pageChanged: Boolean = false,
+        fromReadAloud: Boolean = false,
+        prefetchContinuation: String? = null
+    ) {
         callBack?.get()?.pageChanged()
         curTextChapter?.let {
             if (fromReadAloud && BaseReadAloudService.isRun && it.isCompleted) {
@@ -798,17 +858,11 @@ object ReadBook : CoroutineScope by MainScope() {
                     // 滚动翻页模式：既有语义与优先级保持不变（章节读完即暂停）
                     ReadAloud.pause(appCtx)
                 } else {
-                    // R4：非滚动路径交由跟随状态机决策（仅朗读推进 / 同步继续 / 停止）
-                    when (
-                        SpeechFollowState.nextChapterDecision(
-                            // 与 moveToNextChapter 同一判定口径（含模拟翻页）
-                            hasNextSpeechChapter = durChapterIndex < simulatedChapterSize - 1,
-                            visibleSyncMoved = pageChanged
-                        )
-                    ) {
-                        SpeechFollowState.NextChapterDecision.STOP -> ReadAloud.pause(appCtx)
-                        else -> readAloud(!BaseReadAloudService.pause)
-                    }
+                    // 此处目标章已就绪，包括最后一章；是否还有后续章由播放完毕时判断。
+                    readAloud(
+                        !BaseReadAloudService.pause,
+                        prefetchContinuation = prefetchContinuation
+                    )
                 }
             }
         }
@@ -819,13 +873,24 @@ object ReadBook : CoroutineScope by MainScope() {
     /**
      * 朗读
      */
-    fun readAloud(play: Boolean = true, startPos: Int = 0) {
+    fun readAloud(
+        play: Boolean = true,
+        startPos: Int = 0,
+        userInitiated: Boolean = false,
+        prefetchRequest: String? = null,
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(book?.bookUrl.orEmpty())
+    ) {
         book ?: return
         val textChapter = curTextChapter ?: return
         if (textChapter.isCompleted) {
             // R4：新朗读会话启动 → 恢复跟随（跨章返回/重新发起朗读不再从页首重播）
             SpeechFollowState.restoreForNewSpeechSession()
-            ReadAloud.play(appCtx, play, startPos = startPos)
+            ReadAloud.play(
+                appCtx, play, startPos = startPos,
+                userInitiated = userInitiated, prefetchRequest = prefetchRequest,
+                prefetchContinuation = prefetchContinuation
+            )
         }
     }
 
@@ -968,6 +1033,7 @@ object ReadBook : CoroutineScope by MainScope() {
         upContent: Boolean = true,
         resetPageOffset: Boolean = false,
         forceReload: Boolean = false,
+        readAloudRequest: ChapterReadAloudRequest.Request? = null,
         success: (() -> Unit)? = null
     ) {
         var requestGeneration: Long? = null
@@ -982,6 +1048,7 @@ object ReadBook : CoroutineScope by MainScope() {
             if (upContent) {
                 callBack?.get()?.upContent(index - durChapterIndex, resetPageOffset)
             }
+            if (readAloudRequest != null) completeCachedChapterReadAloud(readAloudRequest)
             success?.invoke()
             return
         }
@@ -1000,7 +1067,7 @@ object ReadBook : CoroutineScope by MainScope() {
                 showCurrentChapterLoadError(index, "未找到当前章节，可能目录未加载成功")
                 return@async
             }
-            val generation = beginChapterLoad(index, requestedLayoutKey)
+            val generation = beginChapterLoad(index, requestedLayoutKey, readAloudRequest)
             if (generation != null) {
                 requestGeneration = generation
                 BookHelp.getContent(book, chapter)?.let {
@@ -1039,10 +1106,11 @@ object ReadBook : CoroutineScope by MainScope() {
         index: Int,
         upContent: Boolean = true,
         resetPageOffset: Boolean = false,
+        readAloudRequest: ChapterReadAloudRequest.Request? = null,
         success: (() -> Unit)? = null
     ) = withContext(IO) {
         val requestedLayoutKey = currentChapterLayoutKey()
-        val initialGeneration = beginChapterLoad(index, requestedLayoutKey)
+        val initialGeneration = beginChapterLoad(index, requestedLayoutKey, readAloudRequest)
         if (initialGeneration != null) {
             try {
                 val book = book
@@ -1199,6 +1267,7 @@ object ReadBook : CoroutineScope by MainScope() {
     @Synchronized
     private fun cancelChapterLoading(index: Int, expectedGeneration: Long? = null) {
         if (expectedGeneration != null && chapterLoadGenerations[index] != expectedGeneration) return
+        chapterLoadGenerations[index]?.let { chapterRequests.cancel(book?.bookUrl.orEmpty(), index, it) }
         chapterLoadGenerations.remove(index)
         chapterLoadingJobs.remove(index)?.cancel()
         chapterLoadingLayoutKeys.remove(index)
@@ -1211,12 +1280,23 @@ object ReadBook : CoroutineScope by MainScope() {
     }
 
     @Synchronized
-    private fun beginChapterLoad(index: Int, layoutKey: String): Long? {
-        if (loadingChapters.contains(index)) return null
+    private fun beginChapterLoad(
+        index: Int, layoutKey: String, readAloudRequest: ChapterReadAloudRequest.Request? = null
+    ): Long? {
+        if (loadingChapters.contains(index)) {
+            // 后台正文预加载已占用槽位时，显式等待者绑定同一代次；不丢弃朗读意图。
+            if (chapterLoadingLayoutKeys[index] == layoutKey) {
+                chapterLoadGenerations[index]?.let {
+                    chapterRequests.bind(readAloudRequest, book?.bookUrl.orEmpty(), index, it)
+                }
+            }
+            return null
+        }
         loadingChapters.add(index)
         val generation = chapterLoadGenerationSeed.incrementAndGet()
         chapterLoadGenerations[index] = generation
         chapterLoadingLayoutKeys[index] = layoutKey
+        chapterRequests.bind(readAloudRequest, book?.bookUrl.orEmpty(), index, generation)
         return generation
     }
 
@@ -1233,6 +1313,7 @@ object ReadBook : CoroutineScope by MainScope() {
 
     @Synchronized
     private fun finishChapterLoad(index: Int, generation: Long) {
+        chapterRequests.cancel(book?.bookUrl.orEmpty(), index, generation)
         if (chapterLoadGenerations[index] == generation) {
             chapterLoadGenerations.remove(index)
             chapterLoadingLayoutKeys.remove(index)
@@ -1408,6 +1489,21 @@ object ReadBook : CoroutineScope by MainScope() {
             ) {
                 return@async false
             }
+            NovelAudioPreparationCoordinator.onFinalContent(
+                book = book,
+                chapter = chapter,
+                content = contents,
+                generation = generation,
+                layoutKey = requestedLayoutKey,
+                isCurrent = {
+                    isChapterLoadRequestCurrent(
+                        book.bookUrl,
+                        chapter.index,
+                        requestedLayoutKey,
+                        generation
+                    )
+                }
+            )
             val textChapter = ChapterProvider.getTextChapterAsync(
                 this, book, chapter, displayTitle, contents, simulatedChapterSize
             )
@@ -1474,11 +1570,12 @@ object ReadBook : CoroutineScope by MainScope() {
                         )
                     ) return@withLock false
                     if (upContent) callBack?.get()?.upContent(offset, !available && resetPageOffset)
-                    val fromReadAloud = readAloudPendingLoadChapterIndex == chapter.index
-                    if (fromReadAloud) {
-                        readAloudPendingLoadChapterIndex = -1
+                    withContext(Main) {
+                        if (isChapterLoadSlotCurrent(
+                                book.bookUrl, chapter.index, requestedLayoutKey, generation, offset, textChapter
+                            )
+                        ) completeChapterReadAloud(book.bookUrl, chapter.index, generation)
                     }
-                    curPageChanged(fromReadAloud = fromReadAloud)
                     callBack?.get()?.contentLoadFinish()
                     isChapterLoadSlotCurrent(
                         book.bookUrl,
@@ -1648,6 +1745,21 @@ object ReadBook : CoroutineScope by MainScope() {
                     requestGeneration
                 )
             ) return false
+            NovelAudioPreparationCoordinator.onFinalContent(
+                book = book,
+                chapter = chapter,
+                content = contents,
+                generation = requestGeneration,
+                layoutKey = requestedLayoutKey,
+                isCurrent = {
+                    isChapterLoadRequestCurrent(
+                        book.bookUrl,
+                        chapter.index,
+                        requestedLayoutKey,
+                        requestGeneration
+                    )
+                }
+            )
             val createdChapter = ChapterProvider.getTextChapterAsync(
                 this@ReadBook, book, chapter, displayTitle, contents, simulatedChapterSize
             )
@@ -1705,11 +1817,12 @@ object ReadBook : CoroutineScope by MainScope() {
                         )
                     ) return@withLock false
                     if (upContent) callBack?.get()?.upContent(offset, !available && resetPageOffset)
-                    val fromReadAloud = readAloudPendingLoadChapterIndex == chapter.index
-                    if (fromReadAloud) {
-                        readAloudPendingLoadChapterIndex = -1
+                    withContext(Main) {
+                        if (isChapterLoadSlotCurrent(
+                                book.bookUrl, chapter.index, requestedLayoutKey, requestGeneration, offset, createdChapter
+                            )
+                        ) completeChapterReadAloud(book.bookUrl, chapter.index, requestGeneration)
                     }
-                    curPageChanged(fromReadAloud = fromReadAloud)
                     callBack?.get()?.contentLoadFinish()
                     isChapterLoadSlotCurrent(
                         book.bookUrl,

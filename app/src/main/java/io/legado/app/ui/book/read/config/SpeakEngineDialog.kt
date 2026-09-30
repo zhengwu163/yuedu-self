@@ -507,7 +507,7 @@ private fun SpeakEngineScreen(
 @Composable
 private fun rememberSpeechGroups(httpTtsList: List<HttpTTS>): List<SpeechVoiceEngineGroup> {
     val context = LocalContext.current
-    return SpeechVoiceCatalogRepository.allGroups(context, httpTtsList)
+    return SpeechVoiceCatalogRepository.playbackEngineGroups(context, httpTtsList)
 }
 
 private fun httpTtsForGroup(group: SpeechVoiceEngineGroup, httpTtsList: List<HttpTTS>): HttpTTS? {

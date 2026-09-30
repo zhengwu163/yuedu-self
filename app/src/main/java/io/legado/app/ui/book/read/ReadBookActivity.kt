@@ -581,7 +581,7 @@ class ReadBookActivity : BaseReadBookActivity(),
                 if (BaseReadAloudService.isPlay()) {
                     ReadAloud.pause(this)
                 } else {
-                    ReadAloud.resume(this)
+                    ReadAloud.resume(this, userInitiated = true)
                 }
             }
             else -> showActionMenu()
@@ -1552,7 +1552,8 @@ class ReadBookActivity : BaseReadBookActivity(),
             bookUrl = position.bookUrl,
             chapterIndex = position.chapterIndex,
             chapterUrl = position.chapterUrl,
-            chapterPosition = position.chapterPosition
+            chapterPosition = position.chapterPosition,
+            userInitiated = true
         )
     }
 
@@ -3346,7 +3347,7 @@ class ReadBookActivity : BaseReadBookActivity(),
                     onClickReadAloud()
                 }
                 BaseReadAloudService.pause -> {
-                    ReadAloud.resume(this)
+                    ReadAloud.resume(this, userInitiated = true)
                     openPlayerPanel()
                 }
                 else -> openPlayerPanel()
@@ -4301,10 +4302,15 @@ class ReadBookActivity : BaseReadBookActivity(),
      */
     override fun onClickReadAloud() {
         autoPageStop()
+        // 用户动作当场签发；跨章加载闭包只能转交此票据，不能在迟到回调里重新授权。
+        val prefetchRequest = if (!BaseReadAloudService.isRun || BaseReadAloudService.pause) {
+            io.legado.app.help.readaloud.offline.AudioPrefetchPlayback.lifecycle
+                .requestUserPlay(ReadBook.book?.bookUrl.orEmpty())
+        } else null
         // P1/B1-③：首次朗读起点偏好 = 页首/段首（startPos=0 → 命中既有"段首对齐"分支，行为可控）
         if (!BaseReadAloudService.isRun && AppConfig.readAloudStartAtPageTop) {
             ReadAloud.upReadAloudClass()
-            ReadBook.readAloud()
+            ReadBook.readAloud(prefetchRequest = prefetchRequest)
             return
         }
         when {
@@ -4317,17 +4323,17 @@ class ReadBookActivity : BaseReadBookActivity(),
                         val (index, line) = pos
                         if (ReadBook.durChapterIndex != index) {
                             ReadBook.openChapter(index, line.chapterPosition, false) {
-                                ReadBook.readAloud(startPos = line.pagePosition)
+                                ReadBook.readAloud(startPos = line.pagePosition, prefetchRequest = prefetchRequest)
                             }
                         } else {
                             ReadBook.durChapterPos = line.chapterPosition
-                            ReadBook.readAloud(startPos = line.pagePosition)
+                            ReadBook.readAloud(startPos = line.pagePosition, prefetchRequest = prefetchRequest)
                         }
                     } else {
-                        ReadBook.readAloud()
+                        ReadBook.readAloud(prefetchRequest = prefetchRequest)
                     }
                 } else {
-                    ReadBook.readAloud()
+                    ReadBook.readAloud(prefetchRequest = prefetchRequest)
                 }
             }
 
@@ -4340,17 +4346,17 @@ class ReadBookActivity : BaseReadBookActivity(),
                         val (index, line) = pos
                         if (ReadBook.durChapterIndex != index) {
                             ReadBook.openChapter(index, line.chapterPosition, false) {
-                                ReadBook.readAloud(startPos = line.pagePosition)
+                                ReadBook.readAloud(startPos = line.pagePosition, prefetchRequest = prefetchRequest)
                             }
                         } else {
                             ReadBook.durChapterPos = line.chapterPosition
-                            ReadBook.readAloud(startPos = line.pagePosition)
+                            ReadBook.readAloud(startPos = line.pagePosition, prefetchRequest = prefetchRequest)
                         }
                     } else {
-                        ReadBook.readAloud()
+                        ReadBook.readAloud(prefetchRequest = prefetchRequest)
                     }
                 } else {
-                    ReadAloud.resume(this)
+                    ReadAloud.resume(this, prefetchRequest = prefetchRequest)
                 }
             }
 

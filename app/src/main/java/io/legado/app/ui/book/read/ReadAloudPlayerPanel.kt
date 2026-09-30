@@ -1146,14 +1146,16 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
                 context = context,
                 cueIndex = targetCueIndex,
                 chapterPosition = targetPos,
-                play = true
+                play = true,
+                userInitiated = true
             )
         } else {
             ReadAloud.play(
                 context = context,
                 play = true,
                 pageIndex = pageIndex,
-                startPos = startPos
+                startPos = startPos,
+                userInitiated = true
             )
         }
         lastChapterStart = targetPos
@@ -1575,7 +1577,7 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
         }
         val currentRoute = SpeechRoute.fromTtsEngineValue(ReadAloud.ttsEngine)
         return SpeechVoiceCatalogRepository
-            .allGroups(context, httpTtsList)
+            .playbackEngineGroups(context, httpTtsList)
             .map { group ->
             TtsEngineUi(
                     title = group.title,

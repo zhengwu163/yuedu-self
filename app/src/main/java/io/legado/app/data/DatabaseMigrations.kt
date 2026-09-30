@@ -26,7 +26,7 @@ object DatabaseMigrations {
             migration_97_98, migration_98_99, migration_99_100, migration_100_101,
             migration_101_102, migration_102_103, migration_103_104, migration_104_105,
             migration_105_106, migration_106_107, migration_107_108, migration_108_109,
-            migration_109_110
+            migration_109_110, migration_110_111, migration_111_112, migration_112_113
         )
     }
 
@@ -1521,6 +1521,152 @@ object DatabaseMigrations {
                     }
             }
             AppLog.put("AppDatabase Migration 109→110: httpTTS 增列(type/script)+ttsCastingTemplates 建表完成")
+        }
+    }
+
+    private val migration_110_111 = object : Migration(110, 111) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            val statements = listOf(
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_aliases` (
+                    `workKey` TEXT NOT NULL DEFAULT '',
+                    `characterId` INTEGER NOT NULL DEFAULT 0,
+                    `alias` TEXT NOT NULL DEFAULT '',
+                    `normalizedAlias` TEXT NOT NULL DEFAULT '',
+                    `source` TEXT NOT NULL DEFAULT 'server',
+                    `createdAt` INTEGER NOT NULL DEFAULT 0,
+                    `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`workKey`, `normalizedAlias`)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_aliases_workKey_characterId` " +
+                    "ON `novel_audio_aliases` (`workKey`, `characterId`)",
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_voice_bindings` (
+                    `scope` TEXT NOT NULL DEFAULT '',
+                    `characterId` INTEGER NOT NULL DEFAULT 0,
+                    `voiceAssetId` TEXT NOT NULL DEFAULT '',
+                    `revision` INTEGER NOT NULL DEFAULT 0,
+                    `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`scope`, `characterId`)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_voice_bindings_scope_voiceAssetId` " +
+                    "ON `novel_audio_voice_bindings` (`scope`, `voiceAssetId`)",
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_chapter_plans` (
+                    `planId` TEXT NOT NULL DEFAULT '',
+                    `workKey` TEXT NOT NULL DEFAULT '',
+                    `physicalBookUrl` TEXT NOT NULL DEFAULT '',
+                    `chapterIndex` INTEGER NOT NULL DEFAULT 0,
+                    `chapterUrl` TEXT NOT NULL DEFAULT '',
+                    `scope` TEXT NOT NULL DEFAULT '',
+                    `generation` INTEGER NOT NULL DEFAULT 0,
+                    `state` TEXT NOT NULL DEFAULT 'PLANNED',
+                    `retention` TEXT NOT NULL DEFAULT 'AUTO',
+                    `snapshotHash` TEXT NOT NULL DEFAULT '',
+                    `rulesVersion` TEXT NOT NULL DEFAULT '',
+                    `planJson` TEXT NOT NULL DEFAULT '',
+                    `progress` INTEGER NOT NULL DEFAULT 0,
+                    `createdAt` INTEGER NOT NULL DEFAULT 0,
+                    `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`planId`)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_chapter_plans_physicalBookUrl_chapterIndex_generation` " +
+                    "ON `novel_audio_chapter_plans` (`physicalBookUrl`, `chapterIndex`, `generation`)",
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_chapter_plans_workKey_chapterIndex` " +
+                    "ON `novel_audio_chapter_plans` (`workKey`, `chapterIndex`)",
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_segment_artifacts` (
+                    `planId` TEXT NOT NULL DEFAULT '',
+                    `segmentId` TEXT NOT NULL DEFAULT '',
+                    `ttsProfile` TEXT NOT NULL DEFAULT '',
+                    `contentType` TEXT NOT NULL DEFAULT '',
+                    `sha256` TEXT NOT NULL DEFAULT '',
+                    `size` INTEGER NOT NULL DEFAULT 0,
+                    `path` TEXT NOT NULL DEFAULT '',
+                    `state` TEXT NOT NULL DEFAULT 'PENDING',
+                    `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`planId`, `segmentId`)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_segment_artifacts_planId_state` " +
+                    "ON `novel_audio_segment_artifacts` (`planId`, `state`)",
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_download_tasks` (
+                    `taskId` TEXT NOT NULL DEFAULT '',
+                    `planId` TEXT NOT NULL DEFAULT '',
+                    `physicalBookUrl` TEXT NOT NULL DEFAULT '',
+                    `chapterIndex` INTEGER NOT NULL DEFAULT 0,
+                    `scope` TEXT NOT NULL DEFAULT '',
+                    `generation` INTEGER NOT NULL DEFAULT 0,
+                    `state` TEXT NOT NULL DEFAULT 'QUEUED',
+                    `retention` TEXT NOT NULL DEFAULT 'AUTO',
+                    `taskJson` TEXT NOT NULL DEFAULT '',
+                    `progress` INTEGER NOT NULL DEFAULT 0,
+                    `createdAt` INTEGER NOT NULL DEFAULT 0,
+                    `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(`taskId`)
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_download_tasks_physicalBookUrl_chapterIndex` " +
+                    "ON `novel_audio_download_tasks` (`physicalBookUrl`, `chapterIndex`)",
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_download_tasks_planId_generation` " +
+                    "ON `novel_audio_download_tasks` (`planId`, `generation`)",
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_download_tasks_retention_state` " +
+                    "ON `novel_audio_download_tasks` (`retention`, `state`)",
+                """
+                CREATE TABLE IF NOT EXISTS `novel_audio_merge_records` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `workKey` TEXT NOT NULL DEFAULT '',
+                    `primaryCharacterId` INTEGER NOT NULL DEFAULT 0,
+                    `absorbedCharacterId` INTEGER NOT NULL DEFAULT 0,
+                    `primaryNameBefore` TEXT NOT NULL DEFAULT '',
+                    `absorbedNameBefore` TEXT NOT NULL DEFAULT '',
+                    `primaryAliasesBeforeJson` TEXT NOT NULL DEFAULT '[]',
+                    `absorbedAliasesBeforeJson` TEXT NOT NULL DEFAULT '[]',
+                    `voiceBindingsBeforeJson` TEXT NOT NULL DEFAULT '[]',
+                    `state` TEXT NOT NULL DEFAULT 'ACTIVE',
+                    `createdAt` INTEGER NOT NULL DEFAULT 0,
+                    `revokedAt` INTEGER NOT NULL DEFAULT 0
+                )
+                """,
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_merge_records_workKey_createdAt` " +
+                    "ON `novel_audio_merge_records` (`workKey`, `createdAt`)",
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_merge_records_workKey_state` " +
+                    "ON `novel_audio_merge_records` (`workKey`, `state`)"
+            )
+            statements.forEach { db.execSQL(it.trimIndent()) }
+            AppLog.put("AppDatabase Migration 110→111: NovelAudio 六张表创建完成")
+        }
+    }
+
+    val migration_111_112 = object : Migration(111, 112) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `novel_audio_chapter_plans` " +
+                    "ADD COLUMN `stateReason` TEXT NOT NULL DEFAULT ''"
+            )
+            db.execSQL(
+                "ALTER TABLE `novel_audio_download_tasks` " +
+                    "ADD COLUMN `stateReason` TEXT NOT NULL DEFAULT ''"
+            )
+            AppLog.put("AppDatabase Migration 111→112: NovelAudio 状态原因字段添加完成")
+        }
+    }
+
+    val migration_112_113 = object : Migration(112, 113) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "ALTER TABLE `novel_audio_chapter_plans` " +
+                    "ADD COLUMN `executionAttempt` INTEGER NOT NULL DEFAULT 0"
+            )
+            db.execSQL(
+                "ALTER TABLE `novel_audio_download_tasks` " +
+                    "ADD COLUMN `executionAttempt` INTEGER NOT NULL DEFAULT 0"
+            )
+            AppLog.put("AppDatabase Migration 112→113: NovelAudio 执行尝试号字段添加完成")
         }
     }
 

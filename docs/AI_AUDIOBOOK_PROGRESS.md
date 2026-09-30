@@ -70,6 +70,46 @@ Keystore、数据库迁移、坏音频重新排队、旧代际隔离和准备生
   Android 预算闸门、AUTO/PINNED 调度和 local-first 离线链路仍未闭环；
   本批未新增真实云请求，未交付新 APK。下一步继续做集成回归与 P0 门禁。
 
+## P0 生命周期集成回归与预算闸门（2026-09-30）
+
+- 新增三项真实 Room/Repository 生命周期集成设备测试：persist 后只释放自己的
+  execution、新 run 的 persist 等待旧 cleanup 完成、READY/PINNED 不因普通
+  cleanup 失败降级。首次设备任务 `q3q2kw` 实际启动并完成 10 项，3 项因
+  `NoSuchMethodError: persist$default` 失败，Gradle exit 1。根因是 R8 裁剪
+  Kotlin 默认参数桥接方法，测试 APK 仍依赖默认参数 ABI；修复为显式传入
+  `retention` 与 `isAutoAllowed`。
+- 修复后的定向设备任务 `u7ibxt` 实际启动并完成 10 项，XML
+  `tests=10 failures=0 errors=0 skipped=0`，Gradle `BUILD SUCCESSFUL`，exit 0。
+  该 XML 已包含三项新增生命周期用例名。
+- 新增 `NovelAudioBudgetLedger`：独立于凭据的 `noBackupFilesDir` 账本，
+  schemaVersion=2，分析/TTS 各自请求数与 UTF-16 字符上限之外再加组合总上限
+  （默认 120 次 / 29000 字符）；预占在真实 HTTP 之前原子落盘，失败、超时、
+  取消和重试都不退款；并发为 1，拿不到许可立即 `CONCURRENCY_LIMIT`。
+- 账本 fail-closed 面：损坏 JSON、重复键、未知键、缺字段、错类型、尾随内容、
+  负值、超上限、超大文件、符号链接、初始化后账本被删除、以及迟滞的持久
+  `inFlight` 标记全部抛 `LOCAL_BUDGET_UNAVAILABLE`，不会自动归零。
+  云免费额度与桥接本地额度各有持久熔断位，落盘失败仍保留进程内熔断。
+- 预算闸门下沉到 `NovelAudioServerClient` 的 `analyze`、`synthesize`、
+  `preview`，因此下载器的三次重试每次物理发送都会重新预占，无法绕过计数；
+  `health`、`voices`、`match` 不计费。TTS 请求数按 Unicode code point 每 600
+  拆一次（与桥接 `len(text)` 一致），字符额度按 UTF-16 `length`。
+- 修复 429 误分类：网络拦截器此前读不到桥接错误码，导致 `free_quota_only` 与
+  `local_trial_limit` 都退化为可重试的 `RATE_LIMIT`。临时探针实测拦截器位于
+  OkHttp 透明 gzip 解码之下，只能读到压缩字节；改为显式
+  `Accept-Encoding: identity` 并只读有界前缀解析固定 `error.code`，
+  普通 429 仍为 `RATE_LIMIT`。探针文件已删除。
+- 定向 JVM 任务 `eau81k`：`NovelAudioBudgetLedgerTest` XML
+  `tests=20 failures=0 errors=0`，`NovelAudioServerClientTest` XML
+  `tests=35 failures=0 errors=0`，Gradle exit 0。
+- 全量 App JVM 任务 `5zm1n6` 汇总 106 份 XML 共 `tests=909 failures=0
+  errors=0 skipped=4`（4 项为既有 ignored），Gradle `BUILD SUCCESSFUL`。
+- 提交门禁 exit 0：64 个生产文件测试配对、硬编码颜色规则、4 个宿主刷新覆盖
+  均通过；该门禁仍未覆盖 selection colors。
+- 仍未闭环：AUTO 三章与 PINNED 10/20/自定义范围入口、local-first 严格离线、
+  跨章连续播放、杀进程恢复、飞行模式三章连播、普通 TTS/HTTP TTS 设备回归与
+  debug APK 交付。本批未发起真实云请求。
+
+
 ## Android 修复与入口验证（2026-09-29）
 
 - Android 15 `legado_test` 实际执行 Room 迁移 8 项、恢复与隔离 4 项、

@@ -54,6 +54,30 @@ data class SpeechVoiceEngineGroup(
 
 object SpeechVoiceCatalogRepository {
 
+    /** 整章播放引擎单独列出；人物声源目录 allGroups 不包含它。 */
+    fun playbackEngineGroups(context: Context, httpTtsList: List<HttpTTS>): List<SpeechVoiceEngineGroup> =
+        playbackEngineGroups(allGroups(context, httpTtsList))
+
+    fun playbackEngineGroups(voiceGroups: List<SpeechVoiceEngineGroup>): List<SpeechVoiceEngineGroup> {
+        val option = SpeechVoiceOption(
+            key = "novel_audio",
+            engineType = SpeechRoute.ENGINE_NOVEL_AUDIO,
+            engineValue = "novel_audio",
+            engineName = "AI 多角色听书",
+            speakerName = "AI 多角色听书"
+        )
+        return listOf(
+            SpeechVoiceEngineGroup(
+                key = option.key,
+                title = option.engineName,
+                subtitle = "在朗读设置中配置服务 · 支持离线音频",
+                engineType = option.engineType,
+                engineValue = option.engineValue,
+                options = listOf(option)
+            )
+        ) + voiceGroups.filterNot { it.engineType == SpeechRoute.ENGINE_NOVEL_AUDIO }
+    }
+
     fun allGroups(
         context: Context,
         httpTtsList: List<HttpTTS>,

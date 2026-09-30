@@ -67,4 +67,12 @@ class SpeechRouteResolveTest {
         val raw = """{"engineType":"quantum","engineValue":"x"}"""
         assertEquals(SpeechRoute.ENGINE_DEFAULT, SpeechRoute.resolveSpeechRoute(raw).engineType)
     }
+
+    @Test
+    fun novelAudioRouteIsExplicitlyPreserved() {
+        val raw = """{"engineType":"novel_audio","engineValue":"enabled","source":"manual"}"""
+        val route = SpeechRoute.resolveSpeechRoute(raw)
+        assertEquals(SpeechRoute.ENGINE_NOVEL_AUDIO, route.engineType)
+        assertEquals("enabled", route.engineValue)
+    }
 }

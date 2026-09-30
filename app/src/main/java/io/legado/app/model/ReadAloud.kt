@@ -7,10 +7,12 @@ import io.legado.app.constant.AppLog
 import io.legado.app.constant.EventBus
 import io.legado.app.constant.IntentAction
 import io.legado.app.help.config.AppConfig
+import io.legado.app.help.readaloud.novel.NovelAudioPreparationCoordinator
+import io.legado.app.help.readaloud.novel.NovelAudioPreparationPolicy
+import io.legado.app.help.readaloud.offline.AudioPrefetchPlayback
 import io.legado.app.help.readaloud.speech.SpeechRoute
+import io.legado.app.help.readaloud.speech.SpeechRouteServiceResolver
 import io.legado.app.service.BaseReadAloudService
-import io.legado.app.service.HttpReadAloudService
-import io.legado.app.service.TTSReadAloudService
 import io.legado.app.utils.LogUtils
 import io.legado.app.utils.postEvent
 import io.legado.app.utils.startForegroundServiceCompat
@@ -24,12 +26,8 @@ object ReadAloud {
     private var aloudClass: Class<*> = routeToClass(currentRoute)
     val ttsEngine get() = ReadBook.book?.getTtsEngine() ?: AppConfig.ttsEngine
 
-    private fun routeToClass(route: SpeechRoute): Class<*> {
-        return if (route.engineType == SpeechRoute.ENGINE_HTTP) {
-            HttpReadAloudService::class.java
-        } else {
-            TTSReadAloudService::class.java
-        }
+    internal fun routeToClass(route: SpeechRoute): Class<*> {
+        return SpeechRouteServiceResolver.routeToClass(route)
     }
 
     private fun getReadAloudClass(): Class<*> {
@@ -94,17 +92,34 @@ object ReadAloud {
         context: Context,
         play: Boolean = true,
         pageIndex: Int = ReadBook.durPageIndex,
-        startPos: Int = 0
+        startPos: Int = 0,
+        userInitiated: Boolean = false,
+        prefetchRequest: String? = null,
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(ReadBook.book?.bookUrl.orEmpty())
     ) {
+        prepareNovelAudioIfRequested(
+            play = play,
+            userInitiated = userInitiated,
+            prefetchRequest = prefetchRequest,
+            bookUrl = ReadBook.book?.bookUrl.orEmpty(),
+            chapterIndex = ReadBook.durChapterIndex
+        )
         val intent = Intent(context, aloudClass)
         intent.action = IntentAction.play
         intent.putExtra("play", play)
         intent.putExtra("pageIndex", pageIndex)
         intent.putExtra("startPos", startPos)
+        val request = prefetchRequest ?: if (play && userInitiated) {
+            AudioPrefetchPlayback.lifecycle.requestUserPlay(ReadBook.book?.bookUrl.orEmpty())
+        } else null
+        intent.putExtra(AudioPrefetchPlayback.REQUEST, request)
+        intent.putExtra(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
         LogUtils.d("ReadAloud", intent.toString())
         try {
             context.startForegroundServiceCompat(intent)
         } catch (e: Exception) {
+            AudioPrefetchPlayback.lifecycle.cancelRequest(request)
             val msg = "启动朗读服务出错\n${e.localizedMessage}"
             AppLog.put(msg, e)
             context.toastOnUi(msg)
@@ -114,12 +129,27 @@ object ReadAloud {
     fun playByEventBus(
         play: Boolean = true,
         pageIndex: Int = ReadBook.durPageIndex,
-        startPos: Int = 0
+        startPos: Int = 0,
+        userInitiated: Boolean = false,
+        prefetchRequest: String? = null,
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(ReadBook.book?.bookUrl.orEmpty())
     ) {
+        prepareNovelAudioIfRequested(
+            play = play,
+            userInitiated = userInitiated,
+            prefetchRequest = prefetchRequest,
+            bookUrl = ReadBook.book?.bookUrl.orEmpty(),
+            chapterIndex = ReadBook.durChapterIndex
+        )
         val bundle = Bundle().apply {
             putBoolean("play", play)
             putInt("pageIndex", pageIndex)
             putInt("startPos", startPos)
+            putString(AudioPrefetchPlayback.REQUEST, prefetchRequest ?: if (play && userInitiated) {
+                AudioPrefetchPlayback.lifecycle.requestUserPlay(ReadBook.book?.bookUrl.orEmpty())
+            } else null)
+            putString(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
         }
         postEvent(EventBus.READ_ALOUD_PLAY, bundle)
     }
@@ -134,16 +164,38 @@ object ReadAloud {
         cueIndex: Int,
         chapterPosition: Int,
         expectedChapterIndex: Int = ReadBook.durChapterIndex,
-        play: Boolean = BaseReadAloudService.isPlay()
+        play: Boolean = BaseReadAloudService.isPlay(),
+        userInitiated: Boolean = false,
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(ReadBook.book?.bookUrl.orEmpty())
     ) {
         if (!BaseReadAloudService.isRun) return
+        prepareNovelAudioIfRequested(
+            play = play,
+            userInitiated = userInitiated,
+            prefetchRequest = null,
+            bookUrl = ReadBook.book?.bookUrl.orEmpty(),
+            chapterIndex = expectedChapterIndex
+        )
         val intent = Intent(context, aloudClass)
         intent.action = IntentAction.moveTo
         intent.putExtra("cueIndex", cueIndex)
         intent.putExtra("chapterPosition", chapterPosition)
         intent.putExtra("expectedChapterIndex", expectedChapterIndex)
         intent.putExtra("play", play)
-        context.startForegroundServiceCompat(intent)
+        val prefetchRequest = if (play && userInitiated) {
+            AudioPrefetchPlayback.lifecycle.requestUserPlay(ReadBook.book?.bookUrl.orEmpty())
+        } else null
+        intent.putExtra(AudioPrefetchPlayback.REQUEST, prefetchRequest)
+        intent.putExtra(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
+        kotlin.runCatching {
+            context.startForegroundServiceCompat(intent)
+        }.onFailure {
+            AudioPrefetchPlayback.lifecycle.cancelRequest(prefetchRequest)
+            val msg = "定位朗读出错\n${it.localizedMessage}"
+            AppLog.put(msg, it)
+            context.toastOnUi(msg)
+        }
     }
 
     fun playFromPosition(
@@ -151,17 +203,32 @@ object ReadAloud {
         bookUrl: String,
         chapterIndex: Int,
         chapterUrl: String,
-        chapterPosition: Int
+        chapterPosition: Int,
+        userInitiated: Boolean = false,
+        prefetchContinuation: String? = AudioPrefetchPlayback.lifecycle.continuation(bookUrl)
     ) {
+        prepareNovelAudioIfRequested(
+            play = true,
+            userInitiated = userInitiated,
+            prefetchRequest = null,
+            bookUrl = bookUrl,
+            chapterIndex = chapterIndex
+        )
         val intent = Intent(context, aloudClass)
         intent.action = IntentAction.playFromPosition
         intent.putExtra("bookUrl", bookUrl)
         intent.putExtra("chapterIndex", chapterIndex)
         intent.putExtra("chapterUrl", chapterUrl)
         intent.putExtra("chapterPosition", chapterPosition)
+        val prefetchRequest = if (userInitiated) {
+            AudioPrefetchPlayback.lifecycle.requestUserPlay(bookUrl)
+        } else null
+        intent.putExtra(AudioPrefetchPlayback.REQUEST, prefetchRequest)
+        intent.putExtra(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
         try {
             context.startForegroundServiceCompat(intent)
         } catch (e: Exception) {
+            AudioPrefetchPlayback.lifecycle.cancelRequest(prefetchRequest)
             val msg = "启动选句朗读出错\n${e.localizedMessage}"
             AppLog.put(msg, e)
             context.toastOnUi(msg)
@@ -189,18 +256,23 @@ object ReadAloud {
     fun selectChapter(
         context: Context,
         chapterIndex: Int,
-        continuePlayback: Boolean = BaseReadAloudService.isPlay()
+        continuePlayback: Boolean = BaseReadAloudService.isPlay(),
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(ReadBook.book?.bookUrl.orEmpty())
     ) {
         if (BaseReadAloudService.isRun) {
             val intent = Intent(context, aloudClass)
             intent.action = IntentAction.selectChapter
             intent.putExtra("chapterIndex", chapterIndex)
             intent.putExtra("continuePlayback", continuePlayback)
+            intent.putExtra(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
             context.startForegroundServiceCompat(intent)
         }
     }
 
     fun pause(context: Context) {
+        AudioPrefetchPlayback.lifecycle.revoke()
+        NovelAudioPreparationCoordinator.cancel()
         if (BaseReadAloudService.isRun) {
             val intent = Intent(context, aloudClass)
             intent.action = IntentAction.pause
@@ -208,15 +280,44 @@ object ReadAloud {
         }
     }
 
-    fun resume(context: Context) {
+    fun resume(
+        context: Context,
+        userInitiated: Boolean = false,
+        prefetchRequest: String? = null,
+        prefetchContinuation: String? =
+            AudioPrefetchPlayback.lifecycle.continuation(ReadBook.book?.bookUrl.orEmpty())
+    ) {
         if (BaseReadAloudService.isRun) {
+            prepareNovelAudioIfRequested(
+                play = true,
+                userInitiated = userInitiated,
+                prefetchRequest = prefetchRequest,
+                bookUrl = ReadBook.book?.bookUrl.orEmpty(),
+                chapterIndex = ReadBook.durChapterIndex
+            )
             val intent = Intent(context, aloudClass)
             intent.action = IntentAction.resume
-            context.startForegroundServiceCompat(intent)
+            val request = prefetchRequest ?: if (userInitiated) {
+                AudioPrefetchPlayback.lifecycle.requestUserPlay(ReadBook.book?.bookUrl.orEmpty())
+            } else null
+            intent.putExtra(AudioPrefetchPlayback.REQUEST, request)
+            intent.putExtra(AudioPrefetchPlayback.CONTINUATION, prefetchContinuation)
+            kotlin.runCatching {
+                context.startForegroundServiceCompat(intent)
+            }.onFailure {
+                AudioPrefetchPlayback.lifecycle.cancelRequest(request)
+                val msg = "继续朗读出错\n${it.localizedMessage}"
+                AppLog.put(msg, it)
+                context.toastOnUi(msg)
+            }
+        } else {
+            AudioPrefetchPlayback.lifecycle.cancelRequest(prefetchRequest)
         }
     }
 
     fun stop(context: Context) {
+        AudioPrefetchPlayback.lifecycle.revoke()
+        NovelAudioPreparationCoordinator.cancel()
         if (BaseReadAloudService.isRun) {
             val intent = Intent(context, aloudClass)
             intent.action = IntentAction.stop
@@ -227,6 +328,36 @@ object ReadAloud {
     // 切换书籍时停止朗读（archive-ui P1-B）：与 stop 等价，供 ReadBook.stopReadAloudForBookSwitch 联动 UI 状态
     fun stopForBookSwitch(context: Context) {
         stop(context)
+    }
+
+    private fun prepareNovelAudioIfRequested(
+        play: Boolean,
+        userInitiated: Boolean,
+        prefetchRequest: String?,
+        bookUrl: String,
+        chapterIndex: Int
+    ) {
+        if (!NovelAudioPreparationPolicy.shouldPrepare(
+                currentRoute,
+                play,
+                userInitiated,
+                prefetchRequest,
+                AudioPrefetchPlayback.lifecycle.isPendingUserPlay(prefetchRequest, bookUrl)
+            ) ||
+            bookUrl.isBlank() ||
+            chapterIndex < 0
+        ) return
+
+        NovelAudioPreparationCoordinator.request(bookUrl, chapterIndex)
+        NovelAudioPreparationCoordinator.startCached(
+            bookUrl = bookUrl,
+            chapterIndex = chapterIndex,
+            isCurrent = {
+                ReadBook.book?.bookUrl == bookUrl &&
+                    ReadBook.durChapterIndex == chapterIndex &&
+                    ReadBook.contentLoadFinish
+            }
+        )
     }
 
     fun prevParagraph(context: Context) {

@@ -43,7 +43,7 @@ def CRONET_JARS = [
 /**
  * 字节码版本降级：v69(Java25) → v61(Java17)，其余字节原样保留
  */
-static def patchClassVersion(byte[] bytes) {
+def patchClassVersion = { byte[] bytes ->
     // class 文件头: u4 magic | u2 minor | u2 major
     if (bytes.length >= 8 && bytes[0] == (byte) 0xCA && bytes[1] == (byte) 0xFE) {
         int major = ((bytes[6] & 0xFF) << 8) | (bytes[7] & 0xFF)
@@ -84,7 +84,7 @@ def prepareCronetJars = tasks.register('prepareCronetJars') {
                     source.entries().each { entry ->
                         byte[] bytes = source.getInputStream(entry).withCloseable { it.bytes }
                         if (entry.name.endsWith('.class')) {
-                            bytes = patchClassVersion(bytes)
+                            bytes = patchClassVersion.call(bytes)
                         }
                         def target = new ZipEntry(entry.name)
                         target.time = 0

@@ -10,6 +10,7 @@ object EventBus {
     const val READ_ALOUD_PLAYBACK_STATE = "readAloudPlaybackState"
     const val TTS_PROGRESS = "ttsStart"
     const val READ_ALOUD_PROGRESS = "readAloudProgress"
+    const val NOVEL_AUDIO_PREPARATION = "novelAudioPreparation"
     const val AUDIO_DS = "audioDs"
     const val READ_ALOUD_DS = "readAloudDs"
     const val READ_ALOUD_PANEL_ACTIVE = "readAloudPanelActive"
