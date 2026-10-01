@@ -19,3 +19,19 @@ class InvalidBackendResponseError(NovelAudioError):
 
 class ServiceBusyError(NovelAudioError):
     status, code = 429, "busy"
+
+
+class LeaseError(NovelAudioError):
+    status, code = 409, "invalid_lease"
+
+
+class LeaseExpiredError(LeaseError):
+    code = "lease_expired"
+
+
+class WorkerStartError(NovelAudioError):
+    status, code = 503, "worker_start_failed"
+
+
+class WorkerStopError(NovelAudioError):
+    status, code = 503, "worker_stop_failed"
