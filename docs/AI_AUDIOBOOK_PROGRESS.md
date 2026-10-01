@@ -4,7 +4,8 @@
 
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
 已包含六个 v1 接口、独立标准 TLS 客户端、鉴权、协议校验、有界超时/响应和取消。
-开发 Mock 的行为测试通过。真实 Windows 服务尚未部署，按用户要求暂缓成功联调。
+开发 Mock 的行为测试通过。真实 Windows 服务尚未与 App 联通；2026-10-01 起
+用户准备用自己的本地服务器联调，代码已同步到 GitHub（见下一节）。
 百炼临时桥接已实现并通过离线测试，默认使用 `qwen3.7-plus` 和
 `qwen3-tts-instruct-flash`；首次真实试听章节分析通过。后续已定位 TTS 音频地址白名单
 遗漏，修复后生成一段真实音频并完整解码；完整三角色声音效果仍待验收。
@@ -21,6 +22,43 @@ PINNED 10/20/自定义范围与手动下载入口、启动后续传未完成的�
 PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS / HTTP TTS 不回归
 五项都卡在缺少 AI 听书服务凭据（本批未发起任何真实云请求）。
 没有交付可用新 APK。
+
+## 代码同步与本地服务器联调交接（2026-10-01）
+
+### 用哪个分支
+
+- `feat/ai-audiobook` 包含全部代码，是联调基准。本地 `main`（与 iCode `origin/main` 一致）
+  停在 `0003fdd6`（2026-09-23 架构文档），是 `feat/ai-audiobook` 的祖先，
+  缺少其后全部 34 个提交，即 AI 听书的全部实现、测试和本地桥接/Mock 脚本，不能用于联调。
+- GitHub [`zhengwu163/yuedu-self`](https://github.com/zhengwu163/yuedu-self) 的
+  `feat/ai-audiobook` 与 `main` 均指向同一提交，克隆任一分支得到的代码相同。
+  iCode `origin/main` 未同步，仍停在 `0003fdd6`。
+
+### 仓库里没有、需要在联调机器上自备的内容
+
+| 内容 | 原因 | 怎么得到 |
+|---|---|---|
+| `novel-audio.local.env`（百炼 Key） | 凭据，Git 忽略 | `sh scripts/novel-audio-bridge/start.sh --init` 生成空模板后填写 |
+| `novel-audio.local.state.db`、`novel-audio.local.connection.json` | 桥接随机 Token 与本地额度账本，Git 忽略 | 首次 `--check` 自动生成；账本不可删除重置 |
+| `app/so/` | Cronet 五个 ABI 的原生库，体积大（jar 已在 `app/cronetlib/` 入库） | Gradle 构建期由 `app/download.gradle` 自动下载 |
+| `ai_tests/venv/`、`ai_tests/testdata/audiobook/` | 本机 Python 环境与测试书 | 按 `ai_tests/README.md` 重建；测试书可由 `scripts/manual-test/make_test_books.py` 生成 |
+
+### App 连接本地服务器
+
+- 入口：朗读设置里的「AI 多角色听书服务」，填写根地址与 Access Token。
+  根地址不含 `/v1`、query、fragment 和账号密码；App 自动追加 `/v1/...`。
+- `http://` 地址必须在该页勾选「允许明文 HTTP」，否则保存被拒绝；明文下正文与令牌不加密，仅限可信局域网。
+- 服务端须实现 [NovelAudioServer v1 协议](NOVEL_AUDIO_SERVER_API_V1.md) 的六个端点；
+  百炼临时桥接就是这份协议的参考实现，见 [桥接说明](../scripts/novel-audio-bridge/README.md)。
+- 桥接只监听 `127.0.0.1:8787`，手机通过 `adb reverse tcp:8787 tcp:8787` 访问
+  `http://127.0.0.1:8787`。若改用局域网里的 Windows 服务器，App 直接填该机地址；
+  不要把服务暴露到公网。
+
+### 联调时优先验收的项目
+
+即下一节「仍未闭环」五项：飞行模式三章连播且零网络请求、PINNED 入口点击链路、
+杀进程后续播、启动续传未完成的固定下载、普通系统 TTS / HTTP TTS 不回归；
+以及三角色声音的真实听感。设备本地预算账本为硬上限，达到后停止生成请求。
 
 ## P1 自动/手动准备链路与接线（2026-10-01）
 
@@ -524,7 +562,8 @@ SIGTERM/SIGKILL 或宿主崩溃。独立复核的额外竞态/反向对照为临
 - 用户主动下载保留，不能被滚动缓存删除。
 - 只有正文、计划及每段真实音频完整才显示可离线；静音占位不算完成。
 - 下载暂停、取消、重启恢复只影响任务，不擅自删除已完成内容。
-- 开发迭代同步 iCode `origin/main`，GitHub 用作上游获取。
+- 开发迭代同步 iCode `origin/main`，GitHub 用作上游获取；2026-10-01 起联调用代码
+  另同步到 GitHub `zhengwu163/yuedu-self`（`feat/ai-audiobook` 与 `main`）。
 
 ## 既有测试覆盖入口
 
@@ -575,7 +614,7 @@ Room instrumentation `MigrationTest` 亦已存在；新表迁移须追加旧数�
 3. 正式签名一致性、覆盖安装和新管线设备 E2E 尚未验证；本批没有进行设备操作。
 4. SDK 许可问题已解除，不再作为当前阻断；本地 Gradle/JVM 通过不等于 APK 交付通过。
 5. 百炼真实章节分析及单段 TTS 生成/解码已有成功记录；三角色听感、跨章同声、
-   Android 全链路仍未验收，正式 Windows 服务成功联调按用户要求暂缓。
+   Android 全链路仍未验收，正式 Windows 服务尚未联调（2026-10-01 起用户开始本地联调）。
    本地 loopback/Mock 不请求用户服务器或付费模型，真实调用继续受既有额度授权限制。
 
 ## 文档索引
