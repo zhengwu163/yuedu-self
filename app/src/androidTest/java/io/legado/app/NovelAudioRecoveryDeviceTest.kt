@@ -619,6 +619,50 @@ class NovelAudioRecoveryDeviceTest {
         )
     }
 
+    /**
+     * 真实 Room 上验证 AUTO 已完整时固定为 PINNED 只提升 retention。
+     *
+     * 设计要求「AUTO READY 转 PINNED 只提升 retention，不重新合成」：
+     * 若这里重新走一次执行，用户点「固定」就会为已有音频再扣一次不可退款额度。
+     */
+    @Test
+    fun pinningACompletedAutoChapterOnlyUpgradesRetention() {
+        dao.insertChapterPlan(
+            plan.toEntity(NovelAudioRetention.AUTO)
+                .copy(state = NovelAudioStates.READY, progress = 100)
+        )
+        dao.insertDownloadTask(
+            NovelAudioDownloadTaskEntity(
+                taskId = taskId,
+                planId = plan.planId,
+                physicalBookUrl = plan.physicalBookUrl,
+                chapterIndex = plan.chapterIndex,
+                generation = plan.generation,
+                retention = NovelAudioRetention.AUTO,
+                state = NovelAudioStates.READY,
+                progress = 100
+            )
+        )
+
+        val execution = checkNotNull(
+            repository.savePlanForExecution(plan, NovelAudioRetention.PINNED, "")
+        )
+
+        // alreadyReady 是「不得重新合成」的唯一信号；执行尝试号也不得推进。
+        assertTrue(execution.alreadyReady)
+        assertEquals(NovelAudioRetention.PINNED, execution.retention)
+        assertEquals(0L, execution.executionAttempt)
+        val storedPlan = checkNotNull(dao.chapterPlan(plan.planId))
+        assertEquals(NovelAudioRetention.PINNED, storedPlan.retention)
+        assertEquals(NovelAudioStates.READY, storedPlan.state)
+        assertEquals(0L, storedPlan.executionAttempt)
+        val storedTask = dao.downloadTasksForPlan(plan.planId).single()
+        assertEquals(NovelAudioRetention.PINNED, storedTask.retention)
+        assertEquals(NovelAudioStates.READY, storedTask.state)
+        // 已 READY 的固定任务不应进入启动恢复队列。
+        assertTrue(repository.recoverablePinnedTasks().isEmpty())
+    }
+
     private fun newRoomLifecycle(
         releaseExecution: (NovelAudioRepository.Execution, String) -> Unit
     ): NovelAudioPreparationLifecycle {
