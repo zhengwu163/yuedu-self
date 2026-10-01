@@ -94,6 +94,7 @@ build_temp.bat
 # 调试 UI 与 VLM 分析工具状态
 .mimosa/
 bak/
+.worktrees/
 /_*.txt
 /_*.xml
 /_*.png
