@@ -2,7 +2,27 @@
 import copy
 import json
 import math
+import sys
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+try:
+    from scripts.novel_audio_server.protocol import (
+        analysis_request as _generic_analysis_request,
+        analysis_response as _generic_analysis_response,
+        parse_analysis_json as _generic_parse_analysis_json,
+        strict_json_loads as _generic_strict_json_loads,
+        synthesis_request as _generic_synthesis_request,
+    )
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.novel_audio_server.protocol import (
+        analysis_request as _generic_analysis_request,
+        analysis_response as _generic_analysis_response,
+        parse_analysis_json as _generic_parse_analysis_json,
+        strict_json_loads as _generic_strict_json_loads,
+        synthesis_request as _generic_synthesis_request,
+    )
 
 MAX_JSON = 2 * 1024 * 1024
 MAX_AUDIO = 16 * 1024 * 1024
@@ -276,3 +296,29 @@ class VoiceCatalog:
             return (v["voiceAssetId"] in used, -matches, -len(wanted & set(v["traits"])),
                     v["voiceAssetId"])
         return sorted(candidates, key=score)
+
+
+# Keep cloud-specific provider voice translation at the Bailian boundary while
+# sharing strict v1 validation with local model services.
+def strict_json_loads(value):
+    return _generic_strict_json_loads(value)
+
+
+def parse_analysis_json(value):
+    return _generic_parse_analysis_json(value)
+
+
+def analysis_request(body):
+    return _generic_analysis_request(body)
+
+
+def analysis_response(value, request):
+    return _generic_analysis_response(value, request)
+
+
+def synthesis_request(body):
+    generic = _generic_synthesis_request(body)
+    return {
+        **generic,
+        "voice": VoiceCatalog().provider_voice(generic["voiceAssetId"]),
+    }
