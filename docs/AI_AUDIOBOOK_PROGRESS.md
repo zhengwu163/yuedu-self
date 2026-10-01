@@ -12,11 +12,127 @@
 当前仍未达到完整产品验收：正文来源、章节分析、人物/声音绑定、Room 计划、
 音频下载和本地播放已有实现，服务设置与全局引擎选择入口已写入，正在验证。
 Keystore、数据库迁移、坏音频重新排队、旧代际隔离和准备生命周期局部回归已通过对应测试。
-播放定位/通知恢复/跨章授权、本地 READY 优先、只补缺段、下载重启恢复仍有待修缺口。
-固定后三章的 AUTO 授权已有 JVM 覆盖，但完整队列和手动下载入口未完成验收。
-没有交付可用新 APK；设备后台播放、飞行模式三章连播和杀进程恢复尚未验收。
+截至 2026-10-01，一期剩余的 P0/P1 逻辑层均已落地并有测试：设备本地预算硬停止、
+AUTO 后三章串行准备、当前章与 AUTO 的车道仲裁、local-first 闸门（离线不建云客户端）、
+PINNED 10/20/自定义范围与手动下载入口、启动后续传未完成的固定下载、
+后台播放位置持久化、跨章续播补救准备。全量 App JVM 1075 项与 Android 15
+`legado_test` 上 `NovelAudioRecoveryDeviceTest` 13 项均为 0 失败。
+但这些接线的**真实运行时行为一律未经设备验收**：飞行模式三章连播且零网络请求、
+PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS / HTTP TTS 不回归
+五项都卡在缺少 AI 听书服务凭据（本批未发起任何真实云请求）。
+没有交付可用新 APK。
 
-## 持久任务隔离与恢复回归（2026-09-30）
+## P1 自动/手动准备链路与接线（2026-10-01）
+
+本节覆盖 `64a427c6..ac5c1b26` 共 26 个 commit（`64a427c6` 本身的 P0 预算闸门见上一节）。
+所有判定、调度、仲裁都有 JVM 覆盖，关键持久化行为有真实 Room 设备覆盖；
+**接线后的真实运行时行为没有设备验收**。
+
+### AUTO 后三章
+
+- 纠正一个先前的误判：AUTO 窗口计算并非缺失，`AudioPrefetchSession.updatePosition()`
+  早已算出 `currentIndex+1 .. min(currentIndex+3, count-1)`（含 Long 提升防溢出），
+  并由 `BaseReadAloudService.prefetchAssembled()` 调用；缺的只是消费端。
+- 新增 `NovelAudioAutoPrefetchScheduler` 串行推进状态机：失败只前进不重试，
+  旧窗口回调与他书回调都不推进。`NovelAudioAutoPrefetchCoordinator` 为执行循环，
+  `isAllowed`/`isLocallyReady`/`prepare` 三点注入，取消可传播、异常终止整窗。
+- `NovelAudioChapterSnapshotLoader` 取后续章只读快照。预处理规则改为构造参数注入
+  （`rules: () -> FrozenReadAloudPreprocessRules`），否则 JVM 下会因
+  `ReadAloudPreprocessRuleConfig.current()` 触发 AppConfig 初始化而
+  `ExceptionInInitializerError`。
+- `NovelAudioPreparationLane` 做车道仲裁：`beginCurrent` 抢占 AUTO；`beginAuto` 在
+  当前章在途、已有 AUTO 在途或目标就是刚播过的那章时拒绝。这一层是必需的——
+  协调器只有一个请求槽、预算账本只允许一个生成请求在途，当前章与 AUTO 必须互斥。
+- `NovelAudioFollowingChapterPreparer` 是 AUTO 侧单章入口，代次由快照散列派生
+  （`snapshotHash.hashCode().toLong() and 0x3FFF_FFFFL`）。其 `finally` 里的
+  `lane.finishAuto(...)` 是正确性关键：变异验证删掉该行后 8 项中 6 项失败。
+- `NovelAudioChapterPreparer` 抽出当前章与 AUTO 共用的固定准备顺序
+  （produce → 取执行令牌 → download）；`NovelAudioPreparationEnvironment` 抽出共享装配，
+  并由调用方注入 persist（当前章走 run token fencing，后续章走车道）。
+- `NovelAudioAutoPrefetchDriver` 是服务侧唯一接入点，在 READY 分支
+  `prefetchAssembled(...)` 之后调用；`playStop`/`pauseReadAloud`/`onDestroy` 调 `revoke()`。
+
+### local-first 与严格离线
+
+- `NovelAudioLocalFirstPolicy` 给出三态 `PLAY_LOCAL` / `PREPARE_REMOTE` /
+  `WAIT_FOR_NETWORK`，复用条件为「计划 READY + 全部 artifact 就绪 + 代次与期望一致」。
+- `NovelAudioLocalFirstGate` 排在 `NovelAudioPreparationEnvironment.open()` **之前**，
+  因此离线判定命中时根本不会构造云客户端。读取计划用
+  `kotlin.runCatching { plan(...) }.getOrNull()`，读失败不会退化成「按本地播放」。
+- 协调器新增 `PreparationResult.Local(generation)` 分支。
+
+### PINNED 手动下载
+
+- `NovelAudioPinnedRangePolicy`：`MAX_CHAPTERS = 20`，预设（当前章 / 后 10 / 后 20）
+  被书末收窄，自定义范围超限直接 `TOO_MANY_CHAPTERS` 拒绝而不静默截断。
+- `NovelAudioPinnedDownloader` 不依赖播放授权，只有 `isCancelled()` 能中断它，
+  以满足「PINNED 不依赖 AUTO lease」。`NovelAudioPinnedDownloadPresenter` 持有界面状态，
+  `options()` 按真实章数裁剪，`start()` 入口重置取消标记。
+- `NovelAudioPinnedDownloadLabels` 单独承载文案：章号对用户 +1，三种拒绝给可行动说明
+  而不暴露枚举名。
+- UI 入口按最小侵入方案落在 `ReadAloudConfigDialog`：新增
+  `KEY_NOVEL_AUDIO_PINNED_DOWNLOAD` action 项（`visible = isNovelAudioRoute`），
+  复用既有 `showComposeChoiceListDialog` + `toastOnUi`，未新增绘制组件。
+
+### 重启恢复、播放位置与跨章续播
+
+- `NovelAudioPinnedRecovery` 只接 `retention == PINNED` 且状态在
+  QUEUED / RUNNING / PARTIAL / WAITING_NETWORK 的任务；`NovelAudioPinnedRecoveryStarter`
+  用 `AtomicBoolean` 做一次性保护、离线跳过，并在 `App.kt` 的
+  `AutoTask.refreshSchedule()` 之后启动。
+- `NovelAudioProgressPersister` 做位置持久化节流（10 秒；换章/换书立即写；
+  同章回退视为迟到回调不写；停止/暂停/销毁调 `flush()`）。服务侧由
+  `publishSegmentProgress()` 驱动，校验 book/chapter 匹配后写 `ReadBook.durChapterPos`
+  并 `saveRead(true)`。这修掉一个既存缺陷：原实现依赖 Activity 观察事件，
+  后台播放时这条链是断开的，所以后台听完的位置根本没落盘。
+- `NovelAudioContinuationPolicy` 修跨章续播静默卡死。根因查证：跨章进入时
+  `readAloud(userInitiated = false, prefetchRequest = null)` 使 `shouldPrepare`
+  必然为 false，于是 Blocked 分支既不准备也不报错，界面一直停在「准备中」。
+  现在 Blocked 分支在「缺段或未就绪 + 有当前章工作」时触发
+  `requestContinuationPreparation()`。
+
+### 自己引入的两个缺陷（都违背「暂停/取消不自动重启」）
+
+- PAUSED 一度被纳入自动恢复。核对本文件「下载恢复」一行的验收口径
+  （「暂停/取消不自动重启」）后，先补失败用例再修。
+- FAILED 一度被纳入自动恢复，**由新增的真实 Room 设备测试抓到**，设备 RED：
+  `expected:<[100, 101, 102, 103]> but was:<[100, 101, 102, 103, 104]>`。
+  纯逻辑测试测不出来——我构造 `PendingTask` 时就带着同一个错误假设，
+  只有真实 Room 查询才会暴露。这是本批里设备测试相对 JVM 测试唯一不可替代的一次。
+
+### 工程踩坑（已二次复现，需视为常规约束）
+
+- **R8 裁剪 Kotlin 默认参数桥接**：AndroidTest 调生产方法必须显式传全部参数。
+  本批第二次撞到（`create$default`，`NovelAudioSegmentIntent.create` 五个默认参数只传两个），
+  上一轮是 `persist$default`。
+- JUnit `TemporaryFolder` 加 `@JvmField` 会让规则失效（20 项全败，报
+  `the temporary folder has not yet been created`）；去掉即可。
+- suspend 测试最后一行是表达式会被 JUnit 判为 `Method should be void`，末尾补 `Unit`。
+
+### 本批验证结果
+
+- 全量 App JVM：`tests=1075 failures=0 errors=0 skipped=4`（4 项为既有 ignored）。
+- Android 15 `legado_test` 上 `NovelAudioRecoveryDeviceTest`：
+  `tests=13 failures=0 errors=0 skipped=0`，Gradle exit 0。新增三项真实 Room 用例：
+  启动恢复只接固定且非用户中断的任务、local-first 闸门仅在全部 artifact 就绪时本地播放、
+  固定一个已完整的 AUTO 章节只升 retention。
+- 提交门禁 exit 0（生产文件测试配对、硬编码颜色、宿主刷新覆盖）。
+- 新增 23 个 JVM 测试文件，合计 166 项用例；`NovelAudioRecoveryDeviceTest`
+  从 10 项扩到 13 项。`app/src/main/assets/updateLog.md` 已按 2026/10/01
+  追加 4 条新增 + 2 条修复。
+
+### 仍未闭环（均需真机 + AI 听书服务凭据）
+
+- 飞行模式连续播放至少三章且网络请求数为零
+- PINNED 入口点击链路（弹窗、选项文案、下载实际发生、toast）
+- 杀进程后从听到位置续播
+- 启动续传未完成的固定下载
+- 普通系统 TTS / HTTP TTS 不回归
+- debug APK 构建与安装验收（须走 `build-legado.bat`，但该脚本硬编码 Windows 路径，
+  在当前 macOS 环境不可直接执行）
+
+本批未发起任何真实云请求，未消耗任何云额度，未交付新 APK。
+
 
 - 扩展迁移/恢复回归任务 `2iscmk` 在 Android 15 `legado_test` 上实际
   `Starting 30 tests`、`Finished 30 tests`，Gradle `BUILD SUCCESSFUL`，
