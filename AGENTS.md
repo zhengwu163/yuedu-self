@@ -127,6 +127,7 @@ ai_tests\venv\Scripts\python.exe ai_tests/scripts/audit_gson_generic_signature.p
 - 配对审计门禁：`ai_tests\venv\Scripts\python.exe ai_tests/scripts/audit_code_change_has_test.py`（未配对 `exit 1`）
 - 全量单测：`.\gradlew testAppDebugUnitTest`（必须全绿）
 - 涉 Gson 反序列化模型变更（含 `List<Model>`/`Map<K,Model>` 字段）：追加 `audit_gson_generic_signature.py` 双包审计（见规则 7）
+- **AndroidTest 调生产方法必须显式传全部参数（2026-10-01 二次复现）**：R8 会裁掉 Kotlin 默认参数生成的 `xxx$default` 桥接方法，测试 APK 一旦依赖默认参数 ABI 就在设备上 `NoSuchMethodError`，且**编译期完全不报错**——只有真机跑了才暴露。已撞两次（`persist$default`、`create$default`），不要再靠 proguard 规则补救，直接把参数写全。
 - 每批次收尾必须附「测试更新证据」：新增/修改的测试文件路径 + 用例数 + 门禁退出码
 > 机制化依据：项目已多次实证「纯文档约束无效」（先例 `apk-publish-workflow.md` 的 fail-fast 拦截、`ai_e2e_testing_workflow.md` 的门禁级规则）。
 
