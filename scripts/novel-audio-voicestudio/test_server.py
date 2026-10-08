@@ -1,0 +1,226 @@
+import tempfile
+import unittest
+from pathlib import Path
+
+from config import load_config
+from errors import ProviderError
+from models import VoiceAsset
+from registry import VoiceRegistry
+from server import _load_registry, _profile_revision, validate_bind_host
+
+
+class ServerConfigTest(unittest.TestCase):
+    def test_discovery_failure_does_not_reuse_or_overwrite_old_registry(self):
+        class UnavailableSpeech:
+            def voices(self):
+                raise ProviderError()
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voices.json"
+            registry = VoiceRegistry.from_records([{
+                "voiceAssetId": "voice", "displayName": "旁白",
+                "gender": "unknown", "ageRange": "adult", "traits": [],
+                "providerRef": "previous-profile",
+            }], profile_revision="previous-revision")
+            registry.save(path)
+            before = path.read_bytes()
+            config = load_config({
+                "NOVEL_AUDIO_TOKEN": "gateway-secret",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3901",
+                "VOICESTUDIO_TOKEN": "voicestudio-secret",
+                "NOVEL_AUDIO_VOICE_REGISTRY": str(path),
+            })
+            with self.assertRaises(ProviderError):
+                _load_registry(config, UnavailableSpeech())
+            self.assertEqual(before, path.read_bytes())
+
+    def test_defaults_to_loopback_and_does_not_echo_tokens(self):
+        config = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+        })
+
+        self.assertEqual("127.0.0.1", config.host)
+        self.assertFalse(config.allow_lan)
+        self.assertEqual(8788, config.port)
+        self.assertEqual("wav", config.voicestudio_response_format)
+        self.assertEqual("ffmpeg", config.ffmpeg_path)
+        self.assertEqual("/v1/audio/speech", config.voicestudio_speech_path)
+        self.assertNotIn("gateway-secret", repr(config))
+        self.assertNotIn("voicestudio-secret", repr(config))
+        self.assertNotIn("director-secret", repr(load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "DIRECTOR_TOKEN": "director-secret",
+        })))
+
+    def test_requires_local_gateway_and_voice_studio_tokens(self):
+        with self.assertRaises(ValueError):
+            load_config({
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+                "VOICESTUDIO_TOKEN": "token",
+            })
+        with self.assertRaises(ValueError):
+            load_config({
+                "NOVEL_AUDIO_TOKEN": "token",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            })
+
+    def test_missing_registry_is_discovered_and_saved_from_provider(self):
+        class FakeSpeech:
+            def voices(self):
+                return [
+                    VoiceAsset(
+                        voice_asset_id="voicestudio.profile.demo0001",
+                        display_name="旁白",
+                        gender="unknown",
+                        age_range="adult",
+                        traits=("清晰",),
+                        preview_available=True,
+                    )
+                ]
+
+            def provider_ref_for(self, voice_asset_id):
+                return {
+                    "voicestudio.profile.demo0001": "demo0001",
+                }[voice_asset_id]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voices.json"
+            config = load_config({
+                "NOVEL_AUDIO_TOKEN": "gateway-secret",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+                "VOICESTUDIO_TOKEN": "voicestudio-secret",
+                "NOVEL_AUDIO_VOICE_REGISTRY": str(path),
+            })
+
+            registry = _load_registry(config, FakeSpeech())
+
+            self.assertTrue(path.exists())
+            self.assertEqual("demo0001", registry.resolve(
+                "voicestudio.profile.demo0001"
+            ).provider_ref)
+
+    def test_stale_registry_is_refreshed_when_synthesis_configuration_changes(self):
+        class FakeSpeech:
+            def voices(self):
+                return [
+                    VoiceAsset(
+                        voice_asset_id="voicestudio.profile.demo0001",
+                        display_name="旁白",
+                        gender="unknown",
+                        age_range="adult",
+                        traits=("清晰",),
+                        preview_available=True,
+                    )
+                ]
+
+            def provider_ref_for(self, voice_asset_id):
+                return "demo0001"
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voices.json"
+            first = load_config({
+                "NOVEL_AUDIO_TOKEN": "gateway-secret",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+                "VOICESTUDIO_TOKEN": "voicestudio-secret",
+                "NOVEL_AUDIO_VOICE_REGISTRY": str(path),
+                "VOICESTUDIO_MODEL": "tts-1",
+            })
+            second = load_config({
+                "NOVEL_AUDIO_TOKEN": "gateway-secret",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+                "VOICESTUDIO_TOKEN": "voicestudio-secret",
+                "NOVEL_AUDIO_VOICE_REGISTRY": str(path),
+                "VOICESTUDIO_MODEL": "tts-1-hd",
+            })
+
+            original = _load_registry(first, FakeSpeech())
+            refreshed = _load_registry(second, FakeSpeech())
+
+            self.assertNotEqual(
+                original.profile_revision,
+                refreshed.profile_revision,
+            )
+
+    def test_empty_voice_discovery_does_not_persist_an_empty_registry(self):
+        class EmptySpeech:
+            def voices(self):
+                return []
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "voices.json"
+            config = load_config({
+                "NOVEL_AUDIO_TOKEN": "gateway-secret",
+                "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+                "VOICESTUDIO_TOKEN": "voicestudio-secret",
+                "NOVEL_AUDIO_VOICE_REGISTRY": str(path),
+            })
+
+            with self.assertRaises(ValueError):
+                _load_registry(config, EmptySpeech())
+
+            self.assertFalse(path.exists())
+
+    def test_profile_revision_changes_with_synthesis_configuration(self):
+        first = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "VOICESTUDIO_MODEL": "tts-1",
+        })
+        second = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "VOICESTUDIO_MODEL": "tts-1-hd",
+        })
+
+        self.assertNotEqual(
+            _profile_revision(first),
+            _profile_revision(second),
+        )
+
+        third = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3901",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "VOICESTUDIO_MODEL": "tts-1",
+        })
+        self.assertNotEqual(
+            _profile_revision(first),
+            _profile_revision(third),
+        )
+
+        fourth = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "VOICESTUDIO_PROFILE_REVISION": "2",
+        })
+        self.assertNotEqual(
+            _profile_revision(first),
+            _profile_revision(fourth),
+        )
+
+    def test_non_loopback_bind_requires_explicit_opt_in(self):
+        validate_bind_host("127.0.0.1", allow_lan=False)
+        with self.assertRaises(ValueError):
+            validate_bind_host("0.0.0.0", allow_lan=False)
+        validate_bind_host("0.0.0.0", allow_lan=True)
+
+    def test_provider_config_is_used_for_voice_studio_speech_path(self):
+        config = load_config({
+            "NOVEL_AUDIO_TOKEN": "gateway-secret",
+            "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3900",
+            "VOICESTUDIO_TOKEN": "voicestudio-secret",
+            "VOICESTUDIO_SPEECH_PATH": "/custom/speech",
+        })
+
+        self.assertEqual("/custom/speech", config.voicestudio_speech_path)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -289,3 +289,13 @@ git_log.txt
 /novel-audio.local.state.db*
 /novel-audio.local.connection.json*
 /novel-audio.local.smoke/
+
+# VoiceStudio 本地服务：凭据、音色注册表、模型引用与试听音频
+/novel-audio-voicestudio.local.env
+/novel-audio-voicestudio.local.voices.json*
+/novel-audio-voicestudio.local.smoke/
+/novel-audio-voicestudio.local.models/
+/scripts/novel-audio-voicestudio/config.local.env
+
+# 本地 brainstorm 可视化会话产物
+/.superpowers/

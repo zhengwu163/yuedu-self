@@ -2,6 +2,48 @@
 
 ## 总体状态
 
+### VoiceStudio 方案分支（2026-10-02）
+
+已从 `feat/ai-audiobook` 创建 `feat/ai-audiobook-voicestudio`，目标是以
+VoiceStudio 作为可替换的本地 TTS 宿主，优先在 macOS 验证，最终部署到 Windows
+RTX 5090D v2。Android 继续使用 `NovelAudioServer v1`，保留章节人物、角色绑定、
+Room 音频缓存、AUTO/PINNED、续播、严格离线和普通 TTS/HTTP TTS 兼容。
+
+第一批服务端骨架已完成：通用协议校验、独立 SpeechProvider/DirectorProvider、
+VoiceStudio HTTP Provider、opaque voice registry、音频边界、六端点网关、macOS/Linux
+与 Windows 启动入口。VoiceStudio TTS 与章节分析已解耦；章节分析未配置时明确返回
+`directorReady=false`，不会阻止 TTS 服务单独启动。
+
+当前仅完成离线契约验证和本机 ffmpeg 真实转码验证，VoiceStudio 真实进程尚未在本机
+接通，Android 真机和 Windows 部署仍未验收。新适配层目录为
+`scripts/novel-audio-voicestudio/`，离线测试共 56 项；包含真实 loopback HTTP
+网关测试与 ffmpeg 编解码测试，上游使用注入的测试夹具，不代表 VoiceStudio
+真实合成通过。本次检查默认 3900 端口未监听。
+
+本批补齐了 VoiceStudio profile 自动发现与 opaque ID 映射、首次注册表持久化、WAV
+到 Android 兼容 Ogg/Opus 的受限转换、配置变更后的缓存 profile revision、空声库
+失败关闭、loopback/LAN 显式开关及 HTTP 输入边界；本轮修复响应头大小写、
+上游 429 状态映射和配置 repr 中 Director Token 隐藏，新增
+`VOICESTUDIO_PROFILE_REVISION` 与远程 HTTPS 显式开关；本轮补齐请求上下文、
+客户端断开/服务关闭取消、跨 transport 的绝对 deadline、上游 socket 中止、
+Director 实际健康探测和发现失败时的 registry fail-closed。
+
+最近一次验证：VoiceStudio 56/56、百炼桥接 79/79、Mock 7/7，测试配对门禁
+（含未跟踪文件）和 commit 静态门禁均 exit 0。
+
+百炼桥接 `test_quota_reservation_atomic_across_instances` 的偶发失败已定位：
+预算库首次创建时，正式路径先出现空文件、后建表，并发实例在建表前读到空库，
+按损坏处理而拒绝预占。现改为在同目录临时文件建表后用硬链接原子发布，并新增
+确定性复现用例。同一并发用例在旧实现下 200 次运行失败 28 次，修复后 0 次。
+硬链接要求状态文件所在磁盘支持硬链接（APFS/NTFS/ext4 均支持）。
+
+真实接入前仍有以下阻塞项，Phase 1 未验收：
+
+- 本机 VoiceStudio 未发现运行进程，3900 端口未监听，无法执行真实 voice
+  discovery、preview 和三角色试听。
+- 仍需接通真实 VoiceStudio，再生成旁白、男声、女声短句并完成实际试听。
+- 仍需在真实 Director 服务上验证 `/v1/health` 与章节分析联调。
+
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
 已包含六个 v1 接口、独立标准 TLS 客户端、鉴权、协议校验、有界超时/响应和取消。
 开发 Mock 的行为测试通过。真实 Windows 服务尚未与 App 联通；2026-10-01 起
@@ -78,8 +120,30 @@ PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS
 ## P1 自动/手动准备链路与接线（2026-10-01）
 
 本节覆盖 `64a427c6..ac5c1b26` 共 26 个 commit（`64a427c6` 本身的 P0 预算闸门见上一节）。
-所有判定、调度、仲裁都有 JVM 覆盖，关键持久化行为有真实 Room 设备覆盖；
-**接线后的真实运行时行为没有设备验收**。
+所有判定、调度、仲裁都有 JVM 覆盖，关键持久化行为有真实 Room 设备覆盖。
+本批 Android 定向设备回归已完成：NovelAudio 相关回归 55 项全部通过；
+四态主题专项测试 1 项全部通过。飞行模式连续播放、PINNED 点击、
+杀进程续播等完整用户链路仍待真实验收。
+
+### 2026-10-01 Android 定向设备验收
+
+- 设备：`legado_test(AVD) - 15`。
+- NovelAudio 定向回归任务实际执行 55 项，0 failures、0 errors、0 skipped，
+  Gradle exit 0；覆盖 `NovelAudioMigrationTest`、
+  `NovelAudioCatalogDeviceTest`、`NovelAudioServerCredentialsDeviceTest`、
+  `NovelAudioDecoderDeviceTest`、`NovelAudioConfigDialogDeviceTest`、
+  `NovelAudioSettingsUiTest`、`NovelAudioRecoveryDeviceTest`。
+  XML 时间戳为 `2026-10-01T09:44:04`。
+- 四态主题专项使用 `NovelAudioThemeTestRunner` 单独执行，
+  实际执行 1 项，0 failures、0 errors、0 skipped，Gradle exit 0；
+  测试方法为 `sameConfigFragmentRefreshesDefaultAccentPackageAndNightAndRestoresState`，
+  XML 时间戳为 `2026-10-01T09:47:57`。
+- 默认 runner 的 79 项基线任务中有 8 项失败，集中在 Rhino、
+  通用 Compose、既有迁移基线和示例 ContentProvider；这些失败不属于本批
+  NovelAudio 改动，不能替代上述定向范围证据。
+- 本批 Android debug APK 过程构建成功，Python 本地模型服务回归 37/37 通过，
+  commit gates exit 0。正式交付 APK 仍须遵循项目规定的 Windows
+  `build-legado.bat` 流程。
 
 ### AUTO 后三章
 
@@ -116,8 +180,9 @@ PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS
 
 ### PINNED 手动下载
 
-- `NovelAudioPinnedRangePolicy`：`MAX_CHAPTERS = 20`，预设（当前章 / 后 10 / 后 20）
-  被书末收窄，自定义范围超限直接 `TOO_MANY_CHAPTERS` 拒绝而不静默截断。
+- `NovelAudioPinnedRangePolicy`：`MAX_CHAPTERS = 10_000`，预设（当前章 / 后 10 / 后 20）
+  被书末收窄，自定义范围超限直接 `TOO_MANY_CHAPTERS` 拒绝而不静默截断；
+  手动 PINNED 范围不再受旧的 20 章上限限制。
 - `NovelAudioPinnedDownloader` 不依赖播放授权，只有 `isCancelled()` 能中断它，
   以满足「PINNED 不依赖 AUTO lease」。`NovelAudioPinnedDownloadPresenter` 持有界面状态，
   `options()` 按真实章数裁剪，`start()` 入口重置取消标记。
