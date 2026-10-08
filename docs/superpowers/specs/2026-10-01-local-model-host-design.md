@@ -151,12 +151,30 @@ Content-Type: application/json
 ```json
 {
   "leaseId": "opaque-server-scoped-id",
-  "runtimeProfile": "qwen3.5-9b+qwen3-tts-v1"
+  "runtimeProfile": "qwen35-9b-voicedesign-<identity>",
+  "runtimeProfileInfo": {
+    "profileId": "qwen35-9b-voicedesign",
+    "identity": "qwen35-9b-voicedesign-<identity>",
+    "capabilities": [
+      "chapter-analysis",
+      "speech-synthesis",
+      "voice-design",
+      "zh-CN"
+    ],
+    "minVramGb": 24,
+    "hardware": {
+      "status": "deferred"
+    }
+  }
 }
 ```
 
 后续六个推理接口通过 `X-NovelAudio-Lease` header 关联该 Lease。
 Lease 只控制模型生命周期，不改变 Android 的任务、缓存和 READY 状态。
+
+`runtimeProfile` 保留为兼容用的字符串；`runtimeProfileInfo` 是新增的脱敏能力
+描述。它不包含模型文件路径、下载来源或许可证原文。Android 可以用
+`identity` 参与音频缓存隔离，模型切换后不会误复用新 Profile 的音频。
 
 批次完成后客户端调用：
 
@@ -406,6 +424,36 @@ NovelAudioLocal/
 - 模型卸载验证。
 
 部署脚本必须支持已有模型目录，不强制重复下载。
+
+### 8.1 用户绑定模型与未来切换
+
+发布包不携带模型权重。桌面控制端提供模型绑定引导，用户从模型的官方来源
+自行下载后选择本地文件或目录。绑定信息写入本机状态目录，不进入 Git，不写入
+Android 数据库，也不通过服务 API 暴露绝对路径。
+
+模型注册表把每个模型描述为独立资产：
+
+```json
+{
+  "assetId": "user-text-model",
+  "type": "text",
+  "family": "任意模型家族",
+  "format": "gguf",
+  "path": "D:/模型/...",
+  "adapter": "llama.cpp-openai-compatible",
+  "requiredVramGb": 24,
+  "capabilities": ["chapter-analysis", "zh-CN"]
+}
+```
+
+Runtime Profile 只引用文本资产和 TTS 资产，并声明最低显存、并发限制和能力。
+当前 Qwen3.5/Qwen3-TTS 组合是推荐模板，不是代码白名单。未来同一适配器支持
+的新模型只需重新绑定；全新模型家族只需增加对应 Worker adapter，Android v1
+协议和章节计划不变。
+
+每个 Profile 生成稳定 identity，Android 将其纳入音频缓存和 generation key。
+模型、适配器、声库或合成参数变化时，旧音频不会被误认为新 Profile 的产物，
+但完整的旧音频仍可离线播放。
 
 ## 9. 在线模型 Provider
 

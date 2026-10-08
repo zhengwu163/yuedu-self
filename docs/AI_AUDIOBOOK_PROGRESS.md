@@ -2,6 +2,22 @@
 
 ## 总体状态
 
+### 本地模型服务阶段 7B（2026-10-08）
+
+`feat/local-model-service` 已提交 Agent、Worker、Qwen 文本/TTS 适配、Runtime Lease、
+v1 与 runtime 端点及 Windows 运维脚本。macOS 验证：本地服务 289/289、百炼桥接 79/79、
+假后端三角色 smoke 通过、commit gates exit 0。Windows 真实 7B smoke 未执行。
+
+额度并发用例 `test_quota_reservation_atomic_across_instances` 本次定向连跑 30 次均通过，
+仅说明当前未复现，不作为已修复结论。
+
+复盘后调整的优先级（用户已确认）：
+
+1. 先用百炼桥接完成 Android 真机一章端到端，含飞行模式连听与杀进程续听；
+2. 再在 Windows 测本地模型可行性：整章分析+合成耗时、首句等待、整章试听；
+3. 评估将「批次后立即卸载」改为「空闲超时卸载」，并确认 Android 所有请求带 Lease；
+4. 上述通过后再执行 7B 运维验收；VoiceStudio 与本地 Qwen 主线待可行性结果再定。
+
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
 已包含六个 v1 接口、独立标准 TLS 客户端、鉴权、协议校验、有界超时/响应和取消。
 开发 Mock 的行为测试通过。真实 Windows 服务尚未与 App 联通；2026-10-01 起
@@ -116,7 +132,7 @@ PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS
 
 ### PINNED 手动下载
 
-- `NovelAudioPinnedRangePolicy`：`MAX_CHAPTERS = 20`，预设（当前章 / 后 10 / 后 20）
+- `NovelAudioPinnedRangePolicy`：`MAX_CHAPTERS = 10_000`，预设（当前章 / 后 10 / 后 20）
   被书末收窄，自定义范围超限直接 `TOO_MANY_CHAPTERS` 拒绝而不静默截断。
 - `NovelAudioPinnedDownloader` 不依赖播放授权，只有 `isCancelled()` 能中断它，
   以满足「PINNED 不依赖 AUTO lease」。`NovelAudioPinnedDownloadPresenter` 持有界面状态，
@@ -164,7 +180,7 @@ PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS
 
 ### 本批验证结果
 
-- 全量 App JVM：`tests=1075 failures=0 errors=0 skipped=4`（4 项为既有 ignored）。
+- 全量 App JVM：`tests=1089 failures=0 errors=0 skipped=4`（4 项为既有 ignored）。
 - Android 15 `legado_test` 上 `NovelAudioRecoveryDeviceTest`：
   `tests=13 failures=0 errors=0 skipped=0`，Gradle exit 0。新增三项真实 Room 用例：
   启动恢复只接固定且非用户中断的任务、local-first 闸门仅在全部 artifact 就绪时本地播放、
