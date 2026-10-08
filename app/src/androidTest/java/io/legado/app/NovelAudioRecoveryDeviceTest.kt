@@ -528,7 +528,8 @@ class NovelAudioRecoveryDeviceTest {
                     )
                 }
             },
-            resume = { _, chapterIndex -> resumed += chapterIndex; true }
+            resume = { _, chapterIndex -> resumed += chapterIndex; true },
+            openBatch = { _, _ -> null }
         )
 
         runBlocking { recovery.recover() }

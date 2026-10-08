@@ -51,9 +51,9 @@ class NovelAudioPinnedDownloaderTest {
 
         val result = runBlocking {
             downloader.start(
-                selection = NovelAudioPinnedRangePolicy.Selection.Custom(0, 40),
+                selection = NovelAudioPinnedRangePolicy.Selection.Custom(0, 10_000),
                 currentChapterIndex = 0,
-                chapterCount = 500
+                chapterCount = 20_000
             )
         }
 

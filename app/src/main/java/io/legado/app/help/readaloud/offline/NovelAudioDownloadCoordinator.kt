@@ -26,8 +26,28 @@ class NovelAudioDownloadCoordinator(
     private val filesRoot: File,
     private val synthesize: suspend (SynthesisRequest) -> SynthesizedAudio,
     private val retryPolicy: NovelAudioRetryPolicy = NovelAudioRetryPolicy(),
-    private val decoder: (File) -> Boolean = ::canDecodeNovelAudio
+    private val decoder: (File) -> Boolean = ::canDecodeNovelAudio,
+    private val synthesizeWithLease: (suspend (
+        SynthesisRequest,
+        String
+    ) -> SynthesizedAudio)? = null,
+    private val leaseId: String? = null
 ) {
+
+    /** 返回绑定同一 Runtime Lease 的下载器，保证一批章节共用模型进程。 */
+    fun withLease(leaseId: String): NovelAudioDownloadCoordinator {
+        require(leaseId.isNotBlank())
+        return NovelAudioDownloadCoordinator(
+            repository = repository,
+            artifactStore = artifactStore,
+            filesRoot = filesRoot,
+            synthesize = synthesize,
+            retryPolicy = retryPolicy,
+            decoder = decoder,
+            synthesizeWithLease = synthesizeWithLease,
+            leaseId = leaseId
+        )
+    }
 
     suspend fun downloadPlan(
         execution: NovelAudioRepository.Execution,
@@ -95,14 +115,18 @@ class NovelAudioDownloadCoordinator(
                     if (!repository.isExecutionCurrent(execution) ||
                         (effectiveRetention == NovelAudioRetention.AUTO && !isAutoAllowed())
                     ) throw CancellationException("novel audio execution expired")
-                    synthesize(
-                        SynthesisRequest(
-                            text = segment.text,
-                            voiceAssetId = segment.voiceAssetId,
-                            language = segment.language,
-                            speed = segment.speed
-                        )
+                    val request = SynthesisRequest(
+                        text = segment.text,
+                        voiceAssetId = segment.voiceAssetId,
+                        language = segment.language,
+                        speed = segment.speed
                     )
+                    if (leaseId == null) {
+                        synthesize(request)
+                    } else {
+                        synthesizeWithLease?.invoke(request, leaseId)
+                            ?: throw NovelAudioServerException("INVALID_LEASE")
+                    }
                 }
                 val stored = artifactStore.commit(
                     serverScope = plan.serverScope,

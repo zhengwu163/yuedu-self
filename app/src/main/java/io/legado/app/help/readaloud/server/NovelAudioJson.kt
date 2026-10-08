@@ -19,6 +19,20 @@ internal object NovelAudioJson {
         ServerHealth(status, version, root.bool("directorReady"), root.bool("ttsReady"))
     }
 
+    fun runtimeLease(json: String): RuntimeLease = decode(json) { root ->
+        RuntimeLease(root.text("leaseId"), root.text("runtimeProfile"))
+    }
+
+    fun runtimeStatus(json: String): RuntimeStatus = decode(json) { root ->
+        val state = root.text("state")
+        require(state in RUNTIME_STATES)
+        RuntimeStatus(state, root.bool("activeLease"))
+    }
+
+    fun runtimeRelease(json: String) = decode(json) {
+        require(it.text("state") == "idle")
+    }
+
     fun voices(json: String, key: String): List<VoiceAsset> = decode(json) { root ->
         root.objects(key).map {
             VoiceAsset(it.text("voiceAssetId"), it.text("displayName"), it.text("gender"),
@@ -115,4 +129,13 @@ internal object NovelAudioJson {
             it.asString
         }
     }
+
+    private val RUNTIME_STATES = setOf(
+        "idle",
+        "starting",
+        "ready",
+        "generating",
+        "unloading",
+        "failed"
+    )
 }

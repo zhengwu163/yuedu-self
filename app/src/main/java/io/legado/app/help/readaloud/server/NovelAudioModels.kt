@@ -12,6 +12,25 @@ data class ServerHealth(
 )
 
 @Keep
+data class RuntimeLease(
+    val leaseId: String = "",
+    val runtimeProfile: String = ""
+)
+
+@Keep
+data class RuntimeAcquireRequest(
+    val sessionId: String = "",
+    val purpose: String = "",
+    val expectedChapterCount: Int = 0
+)
+
+@Keep
+data class RuntimeStatus(
+    val state: String = "",
+    val activeLease: Boolean = false
+)
+
+@Keep
 data class AnalysisUnit(val unitId: String = "", val text: String = "")
 
 @Keep

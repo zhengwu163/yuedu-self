@@ -43,13 +43,30 @@ object NovelAudioAutoPrefetchDriver {
         val chapters = window.chapters
         job?.cancel()
         job = Coroutine.async<Unit>(ReadBook, executeContext = Dispatchers.IO) {
-            NovelAudioAutoPrefetchCoordinator(
-                isAllowed = { target ->
-                    AudioPrefetchPlayback.lifecycle.isAllowed(work, target)
-                },
-                isLocallyReady = { targetBook, index -> isReady(targetBook, index) },
-                prepare = { targetBook, index -> prepare(book, targetBook, index, chapters.last) }
-            ).run(bookUrl, chapters)
+            val environment = NovelAudioPreparationEnvironment.open() ?: return@async
+            val batch = environment.acquireBatch(
+                purpose = "auto_prefetch",
+                expectedChapterCount = chapters.count()
+            )
+            try {
+                NovelAudioAutoPrefetchCoordinator(
+                    isAllowed = { target ->
+                        AudioPrefetchPlayback.lifecycle.isAllowed(work, target)
+                    },
+                    isLocallyReady = { targetBook, index -> isReady(targetBook, index) },
+                    prepare = { targetBook, index ->
+                        prepare(
+                            book = book,
+                            bookUrl = targetBook,
+                            chapterIndex = index,
+                            lastChapterIndex = chapters.last,
+                            environment = batch.environment
+                        )
+                    }
+                ).run(bookUrl, chapters)
+            } finally {
+                batch.close()
+            }
         }.onError {
             AppLog.put("AI 听书自动预取中断", it)
         }
@@ -82,10 +99,10 @@ object NovelAudioAutoPrefetchDriver {
         book: Book,
         bookUrl: String,
         chapterIndex: Int,
-        lastChapterIndex: Int
+        lastChapterIndex: Int,
+        environment: NovelAudioPreparationEnvironment
     ): Boolean {
         if (book.bookUrl != bookUrl) return false
-        val environment = NovelAudioPreparationEnvironment.open() ?: return false
         val following = NovelAudioFollowingChapterPreparer(
             lane = lane,
             snapshot = { targetBook, index -> snapshotLoader.load(targetBook, index) },

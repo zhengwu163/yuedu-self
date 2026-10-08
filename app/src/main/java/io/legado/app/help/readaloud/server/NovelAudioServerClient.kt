@@ -36,6 +36,8 @@ class NovelAudioServerException(val kind: String) : NoStackTraceException(
         "AUTH" -> "家庭 AI 服务鉴权失败，请检查访问令牌"
         "RATE_LIMIT" -> "家庭 AI 服务繁忙，请稍后重试"
         "CONCURRENCY_LIMIT" -> "家庭 AI 服务正在生成其他内容，请稍后重试"
+        "INVALID_LEASE" -> "家庭 AI 服务会话已失效，请重新开始生成"
+        "UNSUPPORTED" -> "当前 AI 服务不支持运行时模型会话"
         "LOCAL_BUDGET_EXHAUSTED" -> "AI 听书本地试用额度已用尽"
         "LOCAL_BUDGET_UNAVAILABLE" -> "AI 听书本地额度状态不可用，已停止生成"
         "FREE_QUOTA_EXHAUSTED" -> "AI 听书免费云额度已用尽，已停止生成"
@@ -61,10 +63,25 @@ class NovelAudioServerClient(
     }
 
     suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
-        NovelAudioJson.health(json("health", null, 10_000))
+        NovelAudioJson.health(json("health", null, 10_000, null, "GET"))
     }
 
     suspend fun analyze(request: ChapterAnalysisRequest): ChapterAnalysisResponse = withContext(Dispatchers.IO) {
+        analyzeInternal(request, null)
+    }
+
+    /** 同一批次的分析请求共享一个服务端 runtime lease。 */
+    suspend fun analyze(
+        request: ChapterAnalysisRequest,
+        leaseId: String
+    ): ChapterAnalysisResponse = withContext(Dispatchers.IO) {
+        analyzeInternal(request, leaseId)
+    }
+
+    private suspend fun analyzeInternal(
+        request: ChapterAnalysisRequest,
+        leaseId: String?
+    ): ChapterAnalysisResponse {
         checkConfig(listOf(request.bookId, request.chapterId, request.textHash, request.analysisVersion)
             .all { it.isNotBlank() })
         checkConfig(request.units.isNotEmpty() &&
@@ -75,37 +92,93 @@ class NovelAudioServerClient(
             request.characters.map { it.characterId }.distinct().size == request.characters.size)
         // 先做纯本地校验：非法凭据或超限负载不得消耗不可退款的本地额度。
         val body = encodePayload(request)
+        leaseId?.let(::checkLease)
         peekToken()
         val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
         val reservation = ledger.reserve(
             kind = NovelAudioBudgetLedger.Kind.ANALYSIS,
             utf16Characters = request.units.sumOf { it.text.length }
         )
-        try {
-            NovelAudioJson.analysis(json("chapter/analyze", body, 45_000), request)
+        return try {
+            NovelAudioJson.analysis(
+                json("chapter/analyze", body, 45_000, leaseId, "POST"),
+                request
+            )
         } finally {
             reservation.close()
         }
     }
 
     suspend fun voices(): List<VoiceAsset> = withContext(Dispatchers.IO) {
-        NovelAudioJson.voices(json("voices", null, 15_000), "voices")
+        NovelAudioJson.voices(json("voices", null, 15_000, null, "GET"), "voices")
     }
 
     suspend fun match(request: VoiceMatchRequest): List<VoiceAsset> = withContext(Dispatchers.IO) {
-        NovelAudioJson.voices(json("voices/match", encodePayload(request), 15_000), "candidates")
+        NovelAudioJson.voices(
+            json("voices/match", encodePayload(request), 15_000, null, "POST"),
+            "candidates"
+        )
     }
 
-    suspend fun preview(request: SynthesisRequest): SynthesizedAudio = audio("voices/preview", request)
-    suspend fun synthesize(request: SynthesisRequest): SynthesizedAudio = audio("tts/synthesize", request)
+    suspend fun preview(request: SynthesisRequest): SynthesizedAudio =
+        audio("voices/preview", request, null)
 
-    private suspend fun audio(path: String, request: SynthesisRequest): SynthesizedAudio =
+    suspend fun preview(request: SynthesisRequest, leaseId: String): SynthesizedAudio =
+        audio("voices/preview", request, leaseId)
+
+    suspend fun synthesize(request: SynthesisRequest): SynthesizedAudio =
+        audio("tts/synthesize", request, null)
+
+    suspend fun synthesize(request: SynthesisRequest, leaseId: String): SynthesizedAudio =
+        audio("tts/synthesize", request, leaseId)
+
+    suspend fun acquireRuntime(
+        sessionId: String,
+        purpose: String,
+        expectedChapterCount: Int
+    ): RuntimeLease = withContext(Dispatchers.IO) {
+        checkConfig(
+            sessionId.isNotBlank() &&
+                purpose.isNotBlank() &&
+                expectedChapterCount in 1..10_000
+        )
+        NovelAudioJson.runtimeLease(
+            json(
+                "runtime/acquire",
+                encodePayload(RuntimeAcquireRequest(sessionId, purpose, expectedChapterCount)),
+                45_000,
+                null,
+                "POST"
+            )
+        )
+    }
+
+    suspend fun releaseRuntime(leaseId: String) = withContext(Dispatchers.IO) {
+        checkLease(leaseId)
+        NovelAudioJson.runtimeRelease(
+            json("runtime/release", ByteArray(0), 15_000, leaseId, "POST")
+        )
+        Unit
+    }
+
+    suspend fun runtimeStatus(): RuntimeStatus = withContext(Dispatchers.IO) {
+        NovelAudioJson.runtimeStatus(
+            json("runtime/status", null, 15_000, null, "GET")
+        )
+    }
+
+    private suspend fun audio(
+        path: String,
+        request: SynthesisRequest,
+        leaseId: String?
+    ): SynthesizedAudio =
         withContext(Dispatchers.IO) {
             checkConfig(request.text.isNotBlank() && request.text.length <= 1200 &&
                 request.voiceAssetId.isNotBlank() && request.language.isNotBlank() &&
                 request.speed.isFinite() && request.speed > 0)
             // 先做纯本地校验：非法凭据或超限负载不得消耗不可退款的本地额度。
             val body = encodePayload(request)
+            leaseId?.let(::checkLease)
             peekToken()
             val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
             val reservation = ledger.reserve(
@@ -115,7 +188,7 @@ class NovelAudioServerClient(
                 vendorRequests = (request.text.codePointCount(0, request.text.length) + 599) / 600
             )
             try {
-                val result = exchange(path, body, 30_000, true)
+                val result = exchange(path, body, 30_000, true, leaseId, "POST")
                 SynthesizedAudio(result.bytes, result.type, result.profile)
             } finally {
                 reservation.close()
@@ -139,8 +212,14 @@ class NovelAudioServerClient(
         NovelAudioServerCredentials.validateToken(token)
     }
 
-    private suspend fun json(path: String, body: ByteArray?, timeout: Long): String {
-        val bytes = exchange(path, body, timeout, false).bytes
+    private suspend fun json(
+        path: String,
+        body: ByteArray?,
+        timeout: Long,
+        leaseId: String?,
+        method: String
+    ): String {
+        val bytes = exchange(path, body, timeout, false, leaseId, method).bytes
         return try {
             // 身份字段不允许由替换字符“修好”：编码损坏应拒绝整份响应。
             Charsets.UTF_8.newDecoder()
@@ -155,12 +234,19 @@ class NovelAudioServerClient(
     private class Body(val bytes: ByteArray, val type: String, val profile: String)
     private class HttpStatusFailure(val kind: String) : IOException()
 
-    private suspend fun exchange(path: String, body: ByteArray?, timeout: Long, audio: Boolean): Body {
+    private suspend fun exchange(
+        path: String,
+        body: ByteArray?,
+        timeout: Long,
+        audio: Boolean,
+        leaseId: String?,
+        method: String
+    ): Body {
         return try {
             // OkHttp 的异步 callTimeout 从出队才计时，额外覆盖排队，过期即取消 call。
             // withTimeoutOrNull 只转换自己的超时；调用方的取消/更短 deadline 原样向外传播。
             withTimeoutOrNull(minOf(timeout, timeoutLimitMillis)) {
-                exchangeWithinDeadline(path, body, timeout, audio)
+                exchangeWithinDeadline(path, body, timeout, audio, leaseId, method)
             } ?: throw NovelAudioServerException("TIMEOUT")
         } catch (error: NovelAudioServerException) {
             // 额度耗尽是确定性失败：持久熔断，避免后续请求再触网。
@@ -176,7 +262,9 @@ class NovelAudioServerClient(
         path: String,
         body: ByteArray?,
         timeout: Long,
-        audio: Boolean
+        audio: Boolean,
+        leaseId: String?,
+        method: String
     ): Body {
         currentCoroutineContext().ensureActive()
         val token = kotlin.runCatching(tokenProvider).getOrElse {
@@ -194,9 +282,18 @@ class NovelAudioServerClient(
             // 显式 identity：网络拦截器位于 OkHttp 透明 gzip 解码之下，
             // 若允许 gzip 则错误 body 只能读到压缩字节，额度错误码无法识别。
             .header("Accept-Encoding", "identity")
+        leaseId?.let {
+            checkLease(it)
+            builder.header("X-NovelAudio-Lease", it)
+        }
         if (body != null) {
             checkConfig(body.size <= JSON_LIMIT)
-            builder.post(body.toRequestBody("application/json; charset=utf-8".toMediaType()))
+            builder.method(
+                method,
+                body.toRequestBody("application/json; charset=utf-8".toMediaType())
+            )
+        } else {
+            builder.method(method, null)
         }
         val call = http.newCall(builder.build())
         call.timeout().timeout(minOf(timeout, timeoutLimitMillis), TimeUnit.MILLISECONDS)
@@ -264,6 +361,14 @@ class NovelAudioServerClient(
         if (!valid) throw NovelAudioServerException("CONFIG")
     }
 
+    private fun checkLease(leaseId: String) {
+        checkConfig(
+            leaseId.isNotBlank() &&
+                leaseId.length <= 256 &&
+                leaseId.all { it.code in 33..126 }
+        )
+    }
+
     companion object {
         private const val JSON_LIMIT = 2 * 1024 * 1024
         private const val AUDIO_LIMIT = 16 * 1024 * 1024
@@ -300,6 +405,12 @@ class NovelAudioServerClient(
                         val kind = when {
                             bridgeCode == "free_quota_only" -> "FREE_QUOTA_EXHAUSTED"
                             bridgeCode == "local_trial_limit" -> "LOCAL_BUDGET_EXHAUSTED"
+                            bridgeCode == "busy" -> "CONCURRENCY_LIMIT"
+                            bridgeCode == "invalid_lease" || bridgeCode == "lease_expired" ||
+                                response.code == 409 -> "INVALID_LEASE"
+                            response.code == 404 &&
+                                chain.request().url.encodedPath.endsWith("/v1/runtime/acquire") ->
+                                "UNSUPPORTED"
                             response.code == 401 || response.code == 403 -> "AUTH"
                             response.code == 429 -> "RATE_LIMIT"
                             response.code in 500..599 -> "UNAVAILABLE"

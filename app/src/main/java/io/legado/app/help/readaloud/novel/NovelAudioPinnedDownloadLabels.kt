@@ -7,7 +7,7 @@ package io.legado.app.help.readaloud.novel
  * 拒绝原因必须给出用户能据此行动的说明，不把内部枚举名抛给用户。
  * 章号对用户按 1 起编号，与阅读界面一致；内部仍是零基序号。
  */
-object NovelAudioPinnedDownloadLabels {
+internal object NovelAudioPinnedDownloadLabels {
 
     fun option(option: NovelAudioPinnedDownloadPresenter.Option): String {
         val name = when (val selection = option.selection) {
@@ -43,7 +43,7 @@ object NovelAudioPinnedDownloadLabels {
                 "没有可下载的后续章节"
 
             NovelAudioPinnedRangePolicy.Rejection.TOO_MANY_CHAPTERS ->
-                "一次最多下载 ${NovelAudioPinnedRangePolicy.MAX_CHAPTERS} 章，请缩小范围"
+                "选择的章节范围过大，请缩小范围后重试"
         }
     }
 }

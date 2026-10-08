@@ -52,8 +52,12 @@ class NovelAudioPinnedRecoveryWiringTest {
             starter.contains("NovelAudioPinnedRecovery.create")
         )
         assertTrue(
-            "必须复用固定下载的单章准备入口",
+            "必须复用固定下载的准备入口",
             starter.contains("NovelAudioPinnedChapterPreparer.prepare(")
+        )
+        assertTrue(
+            "启动恢复必须复用固定下载批次入口",
+            starter.contains("NovelAudioPinnedChapterPreparer.openBatch(")
         )
         assertFalse(
             "启动恢复不得自建下载执行器",

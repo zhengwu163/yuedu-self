@@ -127,9 +127,9 @@ class NovelAudioPinnedDownloadPresenterTest {
 
         runBlocking {
             presenter.start(
-                NovelAudioPinnedRangePolicy.Selection.Custom(0, 40),
+                NovelAudioPinnedRangePolicy.Selection.Custom(0, 10_000),
                 currentChapterIndex = 0,
-                chapterCount = 500
+                chapterCount = 20_000
             )
         }
 
@@ -141,6 +141,50 @@ class NovelAudioPinnedDownloadPresenterTest {
                 )
             ),
             states
+        )
+    }
+
+    @Test
+    fun `a configured batch is opened once and closed after the queue`() {
+        val events = Collections.synchronizedList(mutableListOf<String>())
+        val presenter = NovelAudioPinnedDownloadPresenter(
+            prepare = { _, _ ->
+                events += "legacy-prepare"
+                true
+            },
+            openBatch = { expectedChapterCount ->
+                events += "open:$expectedChapterCount"
+                object : NovelAudioChapterBatch {
+                    override suspend fun prepare(chapterIndex: Int, retention: String): Boolean {
+                        events += "prepare:$chapterIndex:$retention"
+                        return true
+                    }
+
+                    override suspend fun close() {
+                        events += "close"
+                    }
+                }
+            },
+            onState = {}
+        )
+
+        runBlocking {
+            presenter.start(
+                NovelAudioPinnedRangePolicy.Selection.Custom(2, 4),
+                currentChapterIndex = 0,
+                chapterCount = 100
+            )
+        }
+
+        assertEquals(
+            listOf(
+                "open:3",
+                "prepare:2:${NovelAudioRetention.PINNED}",
+                "prepare:3:${NovelAudioRetention.PINNED}",
+                "prepare:4:${NovelAudioRetention.PINNED}",
+                "close"
+            ),
+            events
         )
     }
 

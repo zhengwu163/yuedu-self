@@ -6,8 +6,8 @@ import org.junit.Test
 /**
  * PINNED 手动下载的范围解析。
  *
- * 一期只允许四种选择：当前章、后续 10 章、后续 20 章、自定义区间；
- * 任何选择都不得扩大到整本书，因此存在统一的章数上限，超限一律拒绝而非静默截断——
+ * 允许当前章、后续 10 章、后续 20 章和任意合法自定义区间；
+ * 自定义区间仍受协议安全上限保护，超限一律拒绝而非静默截断——
  * 静默截断会让用户以为已经排队的章节其实没有排队。
  */
 class NovelAudioPinnedRangePolicyTest {
@@ -79,15 +79,27 @@ class NovelAudioPinnedRangePolicyTest {
     }
 
     @Test
-    fun `custom range beyond the chapter limit is rejected instead of truncated`() {
+    fun `custom range beyond the safety limit is rejected instead of truncated`() {
         assertEquals(
             NovelAudioPinnedRangePolicy.Result.Rejected(
                 NovelAudioPinnedRangePolicy.Rejection.TOO_MANY_CHAPTERS
             ),
             NovelAudioPinnedRangePolicy.resolve(
-                NovelAudioPinnedRangePolicy.Selection.Custom(0, 20),
+                NovelAudioPinnedRangePolicy.Selection.Custom(0, 10_000),
                 currentChapterIndex = 0,
-                chapterCount = 500
+                chapterCount = 20_000
+            )
+        )
+    }
+
+    @Test
+    fun `custom range supports arbitrary practical batch sizes`() {
+        assertEquals(
+            resolved((100..999).toList()),
+            NovelAudioPinnedRangePolicy.resolve(
+                NovelAudioPinnedRangePolicy.Selection.Custom(100, 999),
+                currentChapterIndex = 0,
+                chapterCount = 2_000
             )
         )
     }
@@ -153,17 +165,17 @@ class NovelAudioPinnedRangePolicyTest {
     }
 
     @Test
-    fun `no selection can pin a whole large book`() {
+    fun `selections preserve order and stay within the protocol safety limit`() {
         listOf(
             NovelAudioPinnedRangePolicy.Selection.CurrentChapter,
             NovelAudioPinnedRangePolicy.Selection.NextTen,
             NovelAudioPinnedRangePolicy.Selection.NextTwenty,
-            NovelAudioPinnedRangePolicy.Selection.Custom(0, 19)
+            NovelAudioPinnedRangePolicy.Selection.Custom(0, 9_999)
         ).forEach { selection ->
             val result = NovelAudioPinnedRangePolicy.resolve(
                 selection,
                 currentChapterIndex = 0,
-                chapterCount = 3000
+                chapterCount = 20_000
             )
 
             val chapters = (result as NovelAudioPinnedRangePolicy.Result.Resolved).chapters

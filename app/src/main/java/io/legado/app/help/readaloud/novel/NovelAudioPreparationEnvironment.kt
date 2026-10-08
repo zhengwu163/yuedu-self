@@ -1,12 +1,17 @@
 package io.legado.app.help.readaloud.novel
 
+import io.legado.app.constant.AppLog
 import io.legado.app.data.appDb
 import io.legado.app.help.readaloud.offline.NovelAudioArtifactStore
 import io.legado.app.help.readaloud.offline.NovelAudioDownloadCoordinator
 import io.legado.app.help.readaloud.offline.canDecodeNovelAudio
 import io.legado.app.help.readaloud.server.NovelAudioAndroidConfigStore
+import io.legado.app.help.readaloud.server.NovelAudioServerClient
+import io.legado.app.help.readaloud.server.NovelAudioServerException
 import splitties.init.appCtx
 import java.io.File
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 当前章与后续章共用的准备环境。
@@ -22,8 +27,53 @@ internal class NovelAudioPreparationEnvironment private constructor(
     val serverScope: String,
     private val characterStore: NovelAudioRoomCharacterStore,
     private val analysis: NovelAudioAnalysisCoordinator,
-    private val downloadCoordinator: NovelAudioDownloadCoordinator
+    private val downloadCoordinator: NovelAudioDownloadCoordinator,
+    private val client: NovelAudioServerClient
 ) {
+
+    /**
+     * 为当前章、AUTO 或 PINNED 打开一个批次运行时。
+     *
+     * 不支持 Runtime Lease 的旧云服务返回一个无 Lease 的兼容批次；支持 Lease
+     * 的本地服务则把分析与合成入口绑定到同一个 opaque leaseId。
+     */
+    suspend fun acquireBatch(
+        purpose: String,
+        expectedChapterCount: Int
+    ): NovelAudioPreparationBatch {
+        require(purpose.isNotBlank())
+        require(expectedChapterCount in 1..10_000)
+        val lease = try {
+            client.acquireRuntime(
+                sessionId = NovelAudioIdentity.storageKey(
+                    "runtime",
+                    UUID.randomUUID().toString()
+                ),
+                purpose = purpose,
+                expectedChapterCount = expectedChapterCount
+            )
+        } catch (error: NovelAudioServerException) {
+            if (error.kind == "UNSUPPORTED") {
+                return NovelAudioPreparationBatch(this, null, client)
+            }
+            throw error
+        }
+        return NovelAudioPreparationBatch(
+            environment = withLease(lease.leaseId),
+            leaseId = lease.leaseId,
+            client = client
+        )
+    }
+
+    private fun withLease(leaseId: String): NovelAudioPreparationEnvironment {
+        return NovelAudioPreparationEnvironment(
+            serverScope = serverScope,
+            characterStore = characterStore,
+            analysis = analysis.withLease(leaseId),
+            downloadCoordinator = downloadCoordinator.withLease(leaseId),
+            client = client
+        )
+    }
 
     /**
      * 为一个章节快照装配单章准备顺序。
@@ -97,7 +147,8 @@ internal class NovelAudioPreparationEnvironment private constructor(
                     analyze = client::analyze,
                     registry = CharacterRegistry(characterStore),
                     voices = client::voices,
-                    match = client::match
+                    match = client::match,
+                    analyzeWithLease = client::analyze
                 ),
                 downloadCoordinator = NovelAudioDownloadCoordinator(
                     repository = NovelAudioRepository(appDb),
@@ -107,9 +158,32 @@ internal class NovelAudioPreparationEnvironment private constructor(
                     ),
                     filesRoot = artifactRoot,
                     synthesize = client::synthesize,
+                    synthesizeWithLease = client::synthesize,
                     decoder = decoder
-                )
+                ),
+                client = client
             )
+        }
+    }
+}
+
+/**
+ * 一次性批次 Lease。即使生成请求取消、换书或服务端 Lease 已过期，也只尝试释放一次，
+ * 并且释放异常不会覆盖原始的章节准备结果。
+ */
+internal class NovelAudioPreparationBatch internal constructor(
+    val environment: NovelAudioPreparationEnvironment,
+    val leaseId: String?,
+    private val client: NovelAudioServerClient
+) {
+    private val closed = AtomicBoolean(false)
+
+    suspend fun close() {
+        if (leaseId.isNullOrBlank() || !closed.compareAndSet(false, true)) return
+        kotlin.runCatching {
+            client.releaseRuntime(leaseId)
+        }.onFailure {
+            AppLog.put("AI 听书运行时释放失败", it)
         }
     }
 }

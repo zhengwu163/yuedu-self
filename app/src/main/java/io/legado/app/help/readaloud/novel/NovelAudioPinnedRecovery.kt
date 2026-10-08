@@ -14,9 +14,13 @@ import kotlinx.coroutines.CancellationException
  *
  * 队列按章节顺序串行推进；单个任务失败不阻断其余任务，取消原样向外传播。
  */
-class NovelAudioPinnedRecovery(
+internal class NovelAudioPinnedRecovery(
     private val pending: () -> List<PendingTask>,
-    private val resume: suspend (String, Int) -> Boolean
+    private val resume: suspend (String, Int) -> Boolean,
+    private val openBatch: suspend (
+        bookUrl: String,
+        expectedChapterCount: Int
+    ) -> NovelAudioChapterBatch?
 ) {
 
     /** 恢复判定所需的最小任务状态。 */
@@ -32,21 +36,52 @@ class NovelAudioPinnedRecovery(
             AppLog.put("AI 听书固定下载恢复读取失败", it)
             return
         }
-        tasks
+        val resumableTasks = tasks
             .filter { it.retention == NovelAudioRetention.PINNED }
             .filter { it.state in RESUMABLE_STATES }
             .filter { it.bookUrl.isNotBlank() && it.chapterIndex >= 0 }
-            .sortedBy { it.chapterIndex }
-            .forEach { task ->
-                try {
-                    resume(task.bookUrl, task.chapterIndex)
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Throwable) {
-                    // 单个章节失败不应让整条固定下载队列停摆。
-                    AppLog.put("AI 听书固定下载恢复失败", error)
+            .groupBy { it.bookUrl }
+
+        for ((bookUrl, bookTasks) in resumableTasks) {
+            val orderedTasks = bookTasks.sortedBy { it.chapterIndex }
+            val batch = try {
+                openBatch(bookUrl, orderedTasks.size)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Throwable) {
+                AppLog.put("AI 听书固定下载恢复批次打开失败", error)
+                null
+            }
+            try {
+                for (task in orderedTasks) {
+                    try {
+                        if (batch == null) {
+                            resume(task.bookUrl, task.chapterIndex)
+                        } else {
+                            batch.prepare(
+                                chapterIndex = task.chapterIndex,
+                                retention = NovelAudioRetention.PINNED
+                            )
+                        }
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        // 单个章节失败不应让整条固定下载队列停摆。
+                        AppLog.put("AI 听书固定下载恢复失败", error)
+                    }
+                }
+            } finally {
+                if (batch != null) {
+                    try {
+                        batch.close()
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        AppLog.put("AI 听书固定下载恢复批次关闭失败", error)
+                    }
                 }
             }
+        }
     }
 
     companion object {
@@ -70,8 +105,9 @@ class NovelAudioPinnedRecovery(
         )
 
         /** 生产实例：只读 Room 中仍待完成的 PINNED 任务。 */
-        fun create(
-            resume: suspend (String, Int) -> Boolean
+        internal fun create(
+            resume: suspend (String, Int) -> Boolean,
+            openBatch: suspend (String, Int) -> NovelAudioChapterBatch?
         ): NovelAudioPinnedRecovery = NovelAudioPinnedRecovery(
             pending = {
                 NovelAudioRepository(appDb).recoverablePinnedTasks().map { task ->
@@ -83,7 +119,8 @@ class NovelAudioPinnedRecovery(
                     )
                 }
             },
-            resume = resume
+            resume = resume,
+            openBatch = openBatch
         )
     }
 }

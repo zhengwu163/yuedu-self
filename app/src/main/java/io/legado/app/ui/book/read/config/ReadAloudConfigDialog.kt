@@ -788,6 +788,9 @@ class ReadAloudConfigDialog() : ComposeDialogFragment(),
             prepare = { chapterIndex, retention ->
                 NovelAudioPinnedChapterPreparer.prepare(book, chapterIndex, retention)
             },
+            openBatch = { expectedChapterCount ->
+                NovelAudioPinnedChapterPreparer.openBatch(book, expectedChapterCount)
+            },
             onState = { state ->
                 lifecycleScope.launch {
                     toastOnUi(NovelAudioPinnedDownloadLabels.state(state))

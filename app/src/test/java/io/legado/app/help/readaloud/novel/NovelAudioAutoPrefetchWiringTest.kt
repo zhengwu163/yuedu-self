@@ -87,6 +87,14 @@ class NovelAudioAutoPrefetchWiringTest {
             driver.contains("NovelAudioPreparationEnvironment.open()")
         )
         assertTrue(
+            "AUTO 必须在整批开始前申请运行时 Lease",
+            driver.contains("acquireBatch(")
+        )
+        assertTrue(
+            "AUTO 必须在取消、异常和完成后释放批次 Lease",
+            driver.contains("batch.close()")
+        )
+        assertTrue(
             "后续章快照必须走只读 loader",
             driver.contains("NovelAudioChapterSnapshotLoader.create()")
         )

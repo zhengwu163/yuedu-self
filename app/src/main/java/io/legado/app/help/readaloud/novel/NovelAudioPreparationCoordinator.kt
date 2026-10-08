@@ -188,38 +188,46 @@ object NovelAudioPreparationCoordinator {
                     reason = "MISSING_CREDENTIALS",
                     generation = entry.generation
                 )
-            // 单章准备顺序只有一份实现；当前章在此绑定 run token fencing。
-            val preparer = environment.preparer { plan, retention ->
-                lifecycle.persistBlocking(
-                    run,
-                    plan,
-                    isAutoAllowed = {
-                        isCurrent() && isRequestCurrent(currentRequest)
-                    }
-                )
-            }
-            when (
-                val result = preparer.prepare(
-                    snapshot = entry.snapshot,
-                    generation = entry.generation,
-                    retention = currentRequest.retention,
-                    isCurrent = {
-                        lifecycle.isCurrent(run) {
+            val batch = environment.acquireBatch(
+                purpose = "current_chapter",
+                expectedChapterCount = 1
+            )
+            try {
+                // 单章准备顺序只有一份实现；当前章在此绑定 run token fencing。
+                val preparer = batch.environment.preparer { plan, retention ->
+                    lifecycle.persistBlocking(
+                        run,
+                        plan,
+                        isAutoAllowed = {
                             isCurrent() && isRequestCurrent(currentRequest)
                         }
-                    }
-                )
-            ) {
-                is NovelAudioChapterPreparer.Result.Ready ->
-                    PreparationResult.Ready(result.plan)
-
-                is NovelAudioChapterPreparer.Result.Failed ->
-                    PreparationResult.Failed(
-                        reason = result.reason,
-                        generation = result.generation
                     )
+                }
+                when (
+                    val result = preparer.prepare(
+                        snapshot = entry.snapshot,
+                        generation = entry.generation,
+                        retention = currentRequest.retention,
+                        isCurrent = {
+                            lifecycle.isCurrent(run) {
+                                isCurrent() && isRequestCurrent(currentRequest)
+                            }
+                        }
+                    )
+                ) {
+                    is NovelAudioChapterPreparer.Result.Ready ->
+                        PreparationResult.Ready(result.plan)
 
-                null -> null
+                    is NovelAudioChapterPreparer.Result.Failed ->
+                        PreparationResult.Failed(
+                            reason = result.reason,
+                            generation = result.generation
+                        )
+
+                    null -> null
+                }
+            } finally {
+                batch.close()
             }
             })        }.onSuccess { result ->
             when (result) {

@@ -122,8 +122,6 @@ class NovelAudioPinnedDownloadLabelsTest {
             assertTrue("不得向用户暴露内部枚举名：$text", !text.contains("_"))
             assertTrue("文案不得为空", text.isNotBlank())
         }
-        assertTrue(
-            texts.any { it.contains(NovelAudioPinnedRangePolicy.MAX_CHAPTERS.toString()) }
-        )
+        assertTrue(texts.any { it.contains("范围") })
     }
 }

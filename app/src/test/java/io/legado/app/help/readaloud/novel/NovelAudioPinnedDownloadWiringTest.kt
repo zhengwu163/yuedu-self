@@ -86,5 +86,9 @@ class NovelAudioPinnedDownloadWiringTest {
             "界面不得直接驱动下载执行器，否则进度与取消规则会出现第二份实现",
             text.contains("NovelAudioPinnedDownloader(")
         )
+        assertTrue(
+            "固定下载必须把整批章数交给共享批次 Lease",
+            text.contains("openBatch =")
+        )
     }
 }

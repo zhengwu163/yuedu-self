@@ -24,14 +24,31 @@ object NovelAudioPinnedRecoveryStarter {
         if (!started.compareAndSet(false, true)) return
         Coroutine.async(executeContext = Dispatchers.IO) {
             if (!NetworkUtils.isAvailable()) return@async
-            NovelAudioPinnedRecovery.create { bookUrl, chapterIndex ->
-                val book = appDb.bookDao.getBook(bookUrl) ?: return@create false
-                NovelAudioPinnedChapterPreparer.prepare(
-                    book = book,
-                    chapterIndex = chapterIndex,
-                    retention = io.legado.app.data.entities.NovelAudioRetention.PINNED
-                )
-            }.recover()
+            NovelAudioPinnedRecovery.create(
+                resume = { bookUrl, chapterIndex ->
+                    val book = appDb.bookDao.getBook(bookUrl)
+                    if (book == null) {
+                        false
+                    } else {
+                        NovelAudioPinnedChapterPreparer.prepare(
+                            book = book,
+                            chapterIndex = chapterIndex,
+                            retention = io.legado.app.data.entities.NovelAudioRetention.PINNED
+                        )
+                    }
+                },
+                openBatch = { bookUrl, expectedChapterCount ->
+                    val book = appDb.bookDao.getBook(bookUrl)
+                    if (book == null) {
+                        null
+                    } else {
+                        NovelAudioPinnedChapterPreparer.openBatch(
+                            book = book,
+                            expectedChapterCount = expectedChapterCount
+                        )
+                    }
+                }
+            ).recover()
         }.onError {
             AppLog.put("AI 听书固定下载恢复失败", it)
         }

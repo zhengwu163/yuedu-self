@@ -26,6 +26,7 @@ class NovelAudioServerClientTest {
     private var mime = "application/json"
     private var payload = """{"status":"ok","apiVersion":"1","directorReady":true,"ttsReady":true}"""
     private var profile: String? = null
+    private val leaseHeaders = CopyOnWriteArrayList<String?>()
     private var retryAfter: String? = null
     private var rawPayload: ByteArray? = null
     private var chunked = false
@@ -37,6 +38,7 @@ class NovelAudioServerClientTest {
                 val files = mutableMapOf<String, String>()
                 session.parseBody(files)
                 requests += Triple(session.uri, session.headers["authorization"], files["postData"].orEmpty())
+                leaseHeaders += session.headers["x-novelaudio-lease"]
                 beforeResponse()
                 val bytes = rawPayload ?: payload.toByteArray(Charsets.UTF_8)
                 val response = if (chunked) {
@@ -75,9 +77,104 @@ class NovelAudioServerClientTest {
         assertEquals("", requests.single().third)
     }
 
+    @Test fun `runtime lease endpoints use strict wire shapes and lease header`() = runBlocking {
+        payload = """{"leaseId":"lease-1","runtimeProfile":"local-qwen-v1"}"""
+        val lease = client.acquireRuntime("session-1", "auto_prefetch", 3)
+        assertEquals("lease-1", lease.leaseId)
+        assertEquals("local-qwen-v1", lease.runtimeProfile)
+        assertEquals("/prefix/v1/runtime/acquire", requests[0].first)
+        assertTrue(requests[0].third.contains("session-1"))
+
+        payload = """{"state":"ready","activeLease":true}"""
+        val runtime = client.runtimeStatus()
+        assertEquals("ready", runtime.state)
+        assertTrue(runtime.activeLease)
+
+        payload = """{"state":"idle"}"""
+        client.releaseRuntime("lease-1")
+        assertEquals("/prefix/v1/runtime/release", requests.last().first)
+        assertEquals("lease-1", leaseHeaders.last())
+        assertEquals("", requests.last().third)
+    }
+
+    @Test fun `lease is attached to generation requests`() = runBlocking {
+        payload = """{"assignments":[{"unitId":"u1","speakerId":"narrator"},{"unitId":"u2","speakerId":"narrator"}],
+            "newCharacters":[],"aliasUpdates":[]}"""
+        client.analyze(request(), "lease-1")
+        assertEquals("lease-1", leaseHeaders.last())
+    }
+
+    @Test fun `runtime lease responses reject missing mistyped and unknown fields`() = runBlocking {
+        for (body in listOf(
+            "{}",
+            """{"leaseId":123,"runtimeProfile":"local-qwen-v1"}""",
+            """{"leaseId":"lease-1","runtimeProfile":""}"""
+        )) {
+            payload = body
+            expectError("PROTOCOL") { client.acquireRuntime("session-1", "auto_prefetch", 3) }
+        }
+
+        for (body in listOf(
+            "{}",
+            """{"state":"unknown","activeLease":false}""",
+            """{"state":"ready","activeLease":"true"}"""
+        )) {
+            payload = body
+            expectError("PROTOCOL") { client.runtimeStatus() }
+        }
+
+        payload = """{"state":"ready"}"""
+        expectError("PROTOCOL") { client.releaseRuntime("lease-1") }
+        Unit
+    }
+
+    @Test fun `runtime lease validates request bounds before network`() = runBlocking {
+        for ((sessionId, purpose, chapterCount) in listOf(
+            Triple("", "auto_prefetch", 3),
+            Triple("session-1", "", 3),
+            Triple("session-1", "auto_prefetch", 0),
+            Triple("session-1", "auto_prefetch", 10_001)
+        )) {
+            expectError("CONFIG") {
+                client.acquireRuntime(sessionId, purpose, chapterCount)
+            }
+        }
+        expectError("CONFIG") { client.releaseRuntime("bad lease") }
+        assertTrue(requests.isEmpty())
+    }
+
     @Test fun `unready health stays unready`() = runBlocking {
         payload = payload.replace("\"ttsReady\":true", "\"ttsReady\":false")
         assertFalse(client.health().ttsReady)
+    }
+
+    @Test fun `missing inference routes are not runtime compatibility signals`() = runBlocking {
+        status = 404
+        payload = """{"error":{"code":"not_found"}}"""
+        expectError("HTTP") { client.health() }
+        expectError("HTTP") { client.analyze(request()) }
+        expectError("HTTP") { client.synthesize(SynthesisRequest("原文", "M017")) }
+        Unit
+    }
+
+    @Test fun `release sends a real empty POST body`() = runBlocking {
+        payload = """{"state":"idle"}"""
+        client.releaseRuntime("lease-1")
+        assertEquals("/prefix/v1/runtime/release", requests.single().first)
+        assertEquals("", requests.single().third)
+        assertEquals(listOf("lease-1"), leaseHeaders)
+    }
+
+    @Test fun `invalid lease header does not consume generation budget`() = runBlocking {
+        val ledger = testLedger()
+        val budgeted = budgetedClient(ledger)
+        expectError("CONFIG") { budgeted.analyze(request(), "bad\nlease") }
+        expectError("CONFIG") {
+            budgeted.synthesize(SynthesisRequest("原文", "M017"), "bad\nlease")
+        }
+        assertEquals(0, ledger.snapshot().analysisRequests)
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+        assertTrue(requests.isEmpty())
     }
 
     @Test fun `saved snapshots never mix new tokens with old server addresses`() = runBlocking {
@@ -312,6 +409,14 @@ class NovelAudioServerClientTest {
     @Test fun `redirect never forwards credentials`() = runBlocking {
         status = 302
         expectError("HTTP") { client.health() }
+        assertEquals(1, requests.size)
+    }
+
+    @Test fun `missing runtime endpoint is reported as unsupported`() = runBlocking {
+        status = 404
+        expectError("UNSUPPORTED") {
+            client.acquireRuntime("session-1", "auto_prefetch", 3)
+        }
         assertEquals(1, requests.size)
     }
 

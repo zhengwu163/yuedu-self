@@ -20,8 +20,26 @@ class NovelAudioAnalysisCoordinator(
     private val analyze: suspend (ChapterAnalysisRequest) -> ChapterAnalysisResponse,
     private val registry: CharacterRegistry? = null,
     private val voices: (suspend () -> List<VoiceAsset>)? = null,
-    private val match: (suspend (VoiceMatchRequest) -> List<VoiceAsset>)? = null
+    private val match: (suspend (VoiceMatchRequest) -> List<VoiceAsset>)? = null,
+    private val analyzeWithLease: (suspend (
+        ChapterAnalysisRequest,
+        String
+    ) -> ChapterAnalysisResponse)? = null,
+    private val leaseId: String? = null
 ) {
+
+    /** 返回绑定同一 Runtime Lease 的分析器，避免调用方逐请求拼接 header。 */
+    fun withLease(leaseId: String): NovelAudioAnalysisCoordinator {
+        require(leaseId.isNotBlank())
+        return NovelAudioAnalysisCoordinator(
+            analyze = analyze,
+            registry = registry,
+            voices = voices,
+            match = match,
+            analyzeWithLease = analyzeWithLease,
+            leaseId = leaseId
+        )
+    }
 
     suspend fun analyze(
         snapshot: NovelAudioChapterSnapshot,
@@ -48,7 +66,14 @@ class NovelAudioAnalysisCoordinator(
                 units = batch,
                 previousAssignments = previousAssignments
             )
-            val response = analyze(request)
+            val response = if (leaseId == null) {
+                analyze(request)
+            } else {
+                analyzeWithLease?.invoke(request, leaseId)
+                    ?: throw NovelAudioAnalysisException(
+                        "lease-aware analysis is not configured"
+                    )
+            }
             validateResponse(request, response, knownCharacters)
 
             val resolved = if (response.newCharacters.isNotEmpty() || response.aliasUpdates.isNotEmpty()) {

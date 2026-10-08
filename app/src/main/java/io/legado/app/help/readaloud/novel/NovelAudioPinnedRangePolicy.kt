@@ -1,16 +1,19 @@
 package io.legado.app.help.readaloud.novel
 
 /**
- * PINNED 手动下载的范围解析，一期只开放四种选择。
+ * PINNED 手动下载的范围解析。
  *
  * 不做 IO、不创建任务，只把用户选择翻译成一段确定的章节序号。
- * 超出上限时明确拒绝而不是静默截断：截断会让用户以为已经排队的章节其实没排队。
+ * 预设会在书末自然收窄；自定义区间支持任意合法剩余章节，但保留一个协议安全上限。
  * 预设选择会被书末自然收窄；自定义区间必须完整落在书内，否则拒绝。
  */
 object NovelAudioPinnedRangePolicy {
 
-    /** 一期固定的单次手动下载章数上限，防止扩大成整本书。 */
-    const val MAX_CHAPTERS = 20
+    /**
+     * 单批服务端协议安全上限，不是产品上的「默认预加载数量」。
+     * 手动下载可以超过 20 章，但仍不能把异常的大整数直接送入 Room/服务端。
+     */
+    const val MAX_CHAPTERS = 10_000
 
     sealed interface Selection {
         data object CurrentChapter : Selection

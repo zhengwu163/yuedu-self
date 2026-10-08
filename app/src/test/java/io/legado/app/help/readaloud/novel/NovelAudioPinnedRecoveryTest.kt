@@ -166,6 +166,37 @@ class NovelAudioPinnedRecoveryTest {
     }
 
     @Test
+    fun `tasks for one book share one batch and close it after ordered preparation`() {
+        val prepared = log()
+        var opened = 0
+        var closed = 0
+        val recovery = recovery(
+            tasks = listOf(task(5), task(3), task(4)),
+            resume = { _, index -> prepared += index; true },
+            openBatch = { _, expectedCount ->
+                opened++
+                assertEquals(3, expectedCount)
+                object : NovelAudioChapterBatch {
+                    override suspend fun prepare(chapterIndex: Int, retention: String): Boolean {
+                        prepared += chapterIndex
+                        return true
+                    }
+
+                    override suspend fun close() {
+                        closed++
+                    }
+                }
+            }
+        )
+
+        runBlocking { recovery.recover() }
+
+        assertEquals(1, opened)
+        assertEquals(1, closed)
+        assertEquals(listOf(3, 4, 5), prepared)
+    }
+
+    @Test
     fun `a task for a blank book is skipped`() {
         val resumed = log()
         val recovery = recovery(
@@ -193,6 +224,11 @@ class NovelAudioPinnedRecoveryTest {
 
     private fun recovery(
         tasks: List<NovelAudioPinnedRecovery.PendingTask>,
-        resume: suspend (String, Int) -> Boolean
-    ) = NovelAudioPinnedRecovery(pending = { tasks }, resume = resume)
+        resume: suspend (String, Int) -> Boolean,
+        openBatch: suspend (String, Int) -> NovelAudioChapterBatch? = { _, _ -> null }
+    ) = NovelAudioPinnedRecovery(
+        pending = { tasks },
+        resume = resume,
+        openBatch = openBatch
+    )
 }

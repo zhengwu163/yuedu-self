@@ -15,20 +15,60 @@ object NovelAudioPinnedChapterPreparer {
 
     private val snapshotLoader = NovelAudioChapterSnapshotLoader.create()
 
+    internal suspend fun openBatch(
+        book: Book,
+        expectedChapterCount: Int
+    ): NovelAudioChapterBatch? {
+        if (book.bookUrl.isBlank() || expectedChapterCount !in 1..10_000) return null
+        val environment = NovelAudioPreparationEnvironment.open() ?: return null
+        return NovelAudioChapterBatchImpl(
+            book = book,
+            runtimeBatch = environment.acquireBatch(
+                purpose = "pinned",
+                expectedChapterCount = expectedChapterCount
+            )
+        )
+    }
+
     suspend fun prepare(book: Book, chapterIndex: Int, retention: String): Boolean {
         if (book.bookUrl.isBlank() || chapterIndex < 0) return false
-        val environment = NovelAudioPreparationEnvironment.open() ?: return false
-        val snapshot = snapshotLoader.load(book, chapterIndex) ?: return false
-        val result = environment.preparer { plan, planRetention ->
-            NovelAudioRepository(io.legado.app.data.appDb)
-                .savePlanForExecution(plan, planRetention)
-        }.prepare(
-            snapshot = snapshot,
-            // 手动下载没有阅读页代次，与后续章一致由快照散列派生稳定代次。
-            generation = snapshot.snapshotHash.hashCode().toLong() and 0x3FFF_FFFFL,
-            retention = retention,
-            isCurrent = { true }
-        )
-        return result is NovelAudioChapterPreparer.Result.Ready
+        val batch = openBatch(book, expectedChapterCount = 1) ?: return false
+        return try {
+            batch.prepare(chapterIndex, retention)
+        } finally {
+            batch.close()
+        }
     }
+
+    private class NovelAudioChapterBatchImpl(
+        private val book: Book,
+        private val runtimeBatch: NovelAudioPreparationBatch
+    ) : NovelAudioChapterBatch {
+
+        override suspend fun prepare(chapterIndex: Int, retention: String): Boolean {
+            if (chapterIndex < 0) return false
+            val snapshot = snapshotLoader.load(book, chapterIndex) ?: return false
+            val result = runtimeBatch.environment.preparer { plan, planRetention ->
+                NovelAudioRepository(io.legado.app.data.appDb)
+                    .savePlanForExecution(plan, planRetention)
+            }.prepare(
+                snapshot = snapshot,
+                // 手动下载没有阅读页代次，与后续章一致由快照散列派生稳定代次。
+                generation = snapshot.snapshotHash.hashCode().toLong() and 0x3FFF_FFFFL,
+                retention = retention,
+                isCurrent = { true }
+            )
+            return result is NovelAudioChapterPreparer.Result.Ready
+        }
+
+        override suspend fun close() {
+            runtimeBatch.close()
+        }
+    }
+}
+
+internal interface NovelAudioChapterBatch {
+    suspend fun prepare(chapterIndex: Int, retention: String): Boolean
+
+    suspend fun close()
 }

@@ -12,8 +12,9 @@ import kotlinx.coroutines.CancellationException
  * 可选项按真实章数裁剪：书末只剩两章时若仍提供「后续 10 章」，
  * 用户会以为排了十章而实际只有两章；无后续章时干脆不提供预设。
  */
-class NovelAudioPinnedDownloadPresenter(
+internal class NovelAudioPinnedDownloadPresenter(
     private val prepare: suspend (chapterIndex: Int, retention: String) -> Boolean,
+    private val openBatch: suspend (expectedChapterCount: Int) -> NovelAudioChapterBatch? = { null },
     private val onState: (State) -> Unit
 ) {
 
@@ -63,31 +64,37 @@ class NovelAudioPinnedDownloadPresenter(
         val total = (resolved as NovelAudioPinnedRangePolicy.Result.Resolved).chapters.size
         var finished = 0
         onState(State.Running(total, finished))
-        val downloader = NovelAudioPinnedDownloader(
-            prepare = { chapterIndex, retention ->
-                // 取消异常必须原样穿过，不能被进度推进掩盖。
-                prepare(chapterIndex, retention).also {
-                    finished++
-                    onState(State.Running(total, finished))
-                }
-            },
-            isCancelled = { cancelled.get() }
-        )
-        when (
-            val result = downloader.start(
-                selection = selection,
-                currentChapterIndex = currentChapterIndex,
-                chapterCount = chapterCount
+        val batch = openBatch(total)
+        try {
+            val downloader = NovelAudioPinnedDownloader(
+                prepare = { chapterIndex, retention ->
+                    // 取消异常必须原样穿过，不能被进度推进掩盖。
+                    (batch?.prepare(chapterIndex, retention)
+                        ?: prepare(chapterIndex, retention)).also {
+                        finished++
+                        onState(State.Running(total, finished))
+                    }
+                },
+                isCancelled = { cancelled.get() }
             )
-        ) {
-            is NovelAudioPinnedDownloader.Result.Completed ->
-                onState(State.Done(result.succeeded, result.failed))
+            when (
+                val result = downloader.start(
+                    selection = selection,
+                    currentChapterIndex = currentChapterIndex,
+                    chapterCount = chapterCount
+                )
+            ) {
+                is NovelAudioPinnedDownloader.Result.Completed ->
+                    onState(State.Done(result.succeeded, result.failed))
 
-            is NovelAudioPinnedDownloader.Result.Cancelled ->
-                onState(State.Cancelled(result.succeeded))
+                is NovelAudioPinnedDownloader.Result.Cancelled ->
+                    onState(State.Cancelled(result.succeeded))
 
-            is NovelAudioPinnedDownloader.Result.Rejected ->
-                onState(State.Rejected(result.reason))
+                is NovelAudioPinnedDownloader.Result.Rejected ->
+                    onState(State.Rejected(result.reason))
+            }
+        } finally {
+            batch?.close()
         }
     }
 
