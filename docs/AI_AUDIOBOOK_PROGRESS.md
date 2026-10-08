@@ -14,11 +14,9 @@ VoiceStudio HTTP Provider、opaque voice registry、音频边界、六端点网�
 与 Windows 启动入口。VoiceStudio TTS 与章节分析已解耦；章节分析未配置时明确返回
 `directorReady=false`，不会阻止 TTS 服务单独启动。
 
-当前仅完成离线契约验证和本机 ffmpeg 真实转码验证，VoiceStudio 真实进程尚未在本机
-接通，Android 真机和 Windows 部署仍未验收。新适配层目录为
-`scripts/novel-audio-voicestudio/`，离线测试共 56 项；包含真实 loopback HTTP
-网关测试与 ffmpeg 编解码测试，上游使用注入的测试夹具，不代表 VoiceStudio
-真实合成通过。本次检查默认 3900 端口未监听。
+当前已完成离线契约验证、本机 ffmpeg 真实转码验证和本机真实 VoiceStudio 链路
+验证（见下文），Android 真机和 Windows 部署仍未验收。新适配层目录为
+`scripts/novel-audio-voicestudio/`。
 
 本批补齐了 VoiceStudio profile 自动发现与 opaque ID 映射、首次注册表持久化、WAV
 到 Android 兼容 Ogg/Opus 的受限转换、配置变更后的缓存 profile revision、空声库
@@ -28,7 +26,26 @@ VoiceStudio HTTP Provider、opaque voice registry、音频边界、六端点网�
 客户端断开/服务关闭取消、跨 transport 的绝对 deadline、上游 socket 中止、
 Director 实际健康探测和发现失败时的 registry fail-closed。
 
-最近一次验证：VoiceStudio 56/56、百炼桥接 79/79、Mock 7/7，测试配对门禁
+2026-10-08 已在本机（Apple M2 16GB，MPS）接通真实 VoiceStudio 0.5.6
+（源码 tag v0.5.6 headless 运行，默认引擎 OmniVoice，模型 3.27 GB 校验 SHA-256），
+并通过适配层完成真实链路：`--check` 返回 `ttsReady=true`，发现 3 个中文设计
+音色（旁白沉稳男声、青年男声、青年女声）加 1 个英文演示音色；preview、三角色
+合成和 90 字长段落均返回 Ogg/Opus，`X-TTS-Profile` 一致。试听文件在已忽略的
+`novel-audio-voicestudio.local.smoke/`，**主观听感待用户确认**。
+
+真实联调暴露并已修复三处问题（离线测试 62 项）：
+
+- 整请求截止时间原为固定 20 秒，90 字段落在 M2 上需约 31 秒，必定 504；新增
+  `NOVEL_AUDIO_REQUEST_TIMEOUT`（默认 40 秒，须小于 Android 45 秒调用超时）。
+- `/v1/audio/voices` 不带性别年龄，所有音色都是 unknown，角色自动选音无法区分
+  男女；现从 `/profiles` 的设计标签补全，男女角色已能各自匹配到对应音色。
+- VoiceStudio 未启动时 `--check/--serve` 打印 Python 堆栈；现输出一行提示并退出 1。
+
+已知限制（VoiceStudio 侧，适配层无法修复）：客户端放弃请求后，VoiceStudio 的
+`/v1/audio/speech` 不会中止生成；实测放弃一段长文本后，下一句短文本排队等了
+约 35 秒。M2 上合成耗时约为音频时长的 1.7 倍，单段约 110 字以内才能在 40 秒内完成。
+
+最近一次验证：VoiceStudio 62/62、百炼桥接 79/79、Mock 7/7，测试配对门禁
 （含未跟踪文件）和 commit 静态门禁均 exit 0。
 
 百炼桥接 `test_quota_reservation_atomic_across_instances` 的偶发失败已定位：
@@ -37,12 +54,12 @@ Director 实际健康探测和发现失败时的 registry fail-closed。
 确定性复现用例。同一并发用例在旧实现下 200 次运行失败 28 次，修复后 0 次。
 硬链接要求状态文件所在磁盘支持硬链接（APFS/NTFS/ext4 均支持）。
 
-真实接入前仍有以下阻塞项，Phase 1 未验收：
+Phase 1 剩余事项：
 
-- 本机 VoiceStudio 未发现运行进程，3900 端口未监听，无法执行真实 voice
-  discovery、preview 和三角色试听。
-- 仍需接通真实 VoiceStudio，再生成旁白、男声、女声短句并完成实际试听。
-- 仍需在真实 Director 服务上验证 `/v1/health` 与章节分析联调。
+- 用户试听确认三角色音色是否可接受。
+- 仍需在真实 Director 服务上验证 `/v1/health` 与章节分析联调；未配置时
+  `directorReady=false`，Android 连接测试要求两者同时为 true。
+- Android 真机联调与 Windows RTX 5090D v2 部署尚未开始。
 
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
 已包含六个 v1 接口、独立标准 TLS 客户端、鉴权、协议校验、有界超时/响应和取消。

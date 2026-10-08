@@ -52,6 +52,31 @@ class StartupCheckTest(unittest.TestCase):
         self.assertNotIn("secret", output)
 
 
+class RequestTimeoutConfigTest(unittest.TestCase):
+    BASE = StartupCheckTest.ENV
+
+    def test_defaults_below_android_call_timeout(self):
+        # Android 端 NovelAudioServerClient 的 callTimeout 为 45 秒。
+        self.assertEqual(40, load_config(dict(self.BASE)).request_timeout)
+        self.assertEqual(30, load_config(dict(
+            self.BASE, NOVEL_AUDIO_REQUEST_TIMEOUT="30")).request_timeout)
+        for value in ("0", "45", "1.5", "abc", ""):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                load_config(dict(self.BASE, NOVEL_AUDIO_REQUEST_TIMEOUT=value))
+
+    def test_gateway_and_speech_provider_use_configured_timeout(self):
+        registry = VoiceRegistry.from_records([{
+            "voiceAssetId": "voice", "displayName": "旁白",
+            "gender": "unknown", "ageRange": "adult", "traits": [],
+            "providerRef": "profile",
+        }], profile_revision="revision")
+        config = load_config(dict(self.BASE, NOVEL_AUDIO_REQUEST_TIMEOUT="30"))
+        with patch.object(server, "_load_registry", return_value=registry):
+            gateway = server.build_gateway(config)
+        self.assertEqual(30, gateway.request_timeout)
+        self.assertEqual(30, gateway.speech.config.request_timeout)
+
+
 class ServerConfigTest(unittest.TestCase):
     def test_discovery_failure_does_not_reuse_or_overwrite_old_registry(self):
         class UnavailableSpeech:

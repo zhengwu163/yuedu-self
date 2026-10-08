@@ -2,6 +2,10 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Android 端 NovelAudioServerClient 的 callTimeout 为 45 秒；服务端整请求截止
+# 时间必须更短，才能在客户端放弃前返回明确的 504，而不是被客户端单方面断开。
+ANDROID_CALL_TIMEOUT = 45
+
 
 @dataclass(frozen=True)
 class ServiceConfig:
@@ -21,6 +25,7 @@ class ServiceConfig:
     registry_path: Path
     director_base_url: str
     director_token: str = field(repr=False)
+    request_timeout: int
 
 
 def load_config(env=None):
@@ -77,7 +82,19 @@ def load_config(env=None):
         ),
         director_base_url=values.get("DIRECTOR_BASE_URL", ""),
         director_token=values.get("DIRECTOR_TOKEN", ""),
+        request_timeout=_request_timeout(
+            values.get("NOVEL_AUDIO_REQUEST_TIMEOUT", "40")
+        ),
     )
+
+
+def _request_timeout(value):
+    if not isinstance(value, str) or not value.isdecimal():
+        raise ValueError("NOVEL_AUDIO_REQUEST_TIMEOUT is invalid")
+    seconds = int(value)
+    if not 1 <= seconds < ANDROID_CALL_TIMEOUT:
+        raise ValueError("NOVEL_AUDIO_REQUEST_TIMEOUT is invalid")
+    return seconds
 
 
 def _required(value, name):

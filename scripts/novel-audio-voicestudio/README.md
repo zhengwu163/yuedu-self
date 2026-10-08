@@ -17,9 +17,8 @@ Android 继续连接本目录提供的六个端点；VoiceStudio 的模型、pro
 - Windows 使用同一套 v1 服务和 PowerShell 启动入口。
 
 当前为开发中的适配层：离线协议/HTTP 夹具验证与真实模型试听分开验收。
-客户端取消传播、整个请求的绝对超时、Director 实际健康探测和发现失败时的
-旧注册表缓存处理已有离线与 loopback 回归覆盖；仍不能替代真实模型试听、Android
-真机验收或 Windows 部署验收。
+2026-10-08 已在 Apple M2 上接通真实 VoiceStudio 0.5.6，完成音色发现、试听与
+三角色合成；Android 真机验收和 Windows 部署验收仍未完成。
 
 ## 配置
 
@@ -39,6 +38,11 @@ VoiceStudio 管理接口。
 如果 VoiceStudio 直接返回 Android 兼容格式，可按实际 API 配置改用其他格式。
 重新生成同一 VoiceStudio profile 后，必须递增 `VOICESTUDIO_PROFILE_REVISION`，
 并重启适配服务，以隔离 Android 端已有音频缓存。
+
+`NOVEL_AUDIO_REQUEST_TIMEOUT` 是单个请求的整体截止时间（秒，默认 40，取值
+1–44），必须小于 Android 端 45 秒的调用超时。超过截止时间返回 504
+`provider_timeout`。实测 Apple M2（MPS）上 OmniVoice 约需音频时长的 1.7 倍，
+单段约 110 字以内才能在 40 秒内完成；更长的段落需要更快的 GPU。
 
 Android 现有连接测试要求 `directorReady` 和 `ttsReady` 同时为 true。
 仅做 TTS 独立开发可以不配置 Director；接入 Android 前须配置并实际验证
@@ -84,6 +88,29 @@ POST /v1/voices/match
 POST /v1/voices/preview
 POST /v1/tts/synthesize
 ```
+
+## 本机 VoiceStudio（已验证 0.5.6）
+
+上游为开源项目 `debpalash/VoiceStudio`（AGPL-3.0，默认引擎 OmniVoice，
+Apache-2.0，模型约 3.27 GB）。本机验证采用源码 headless 方式，不依赖桌面 UI：
+
+```sh
+uv sync --frozen --no-dev --python 3.11
+OMNIVOICE_DATA_DIR=<数据目录> HF_ENDPOINT=https://hf-mirror.com \
+  uv run --frozen --no-sync uvicorn main:app --app-dir backend \
+  --host 127.0.0.1 --port 3900
+```
+
+国内网络下 GitHub 与 huggingface.co 很慢或不可达：依赖可把 `uv.lock` 中
+`files.pythonhosted.org/packages/` 换成清华镜像同路径（uv 仍按锁文件 sha256 校验），
+模型经 `HF_ENDPOINT` 镜像下载后应按 HF 元数据核对 sha256。
+
+音色需在 VoiceStudio 中建成 profile 才会被发现。`/v1/audio/voices` 不带性别年龄，
+适配层会读取 `/profiles` 的设计标签（如 `male, middle-aged, low pitch`）补全，
+供角色自动选音使用；没有标签的克隆音色显示为 `unknown`。
+
+已知限制：客户端放弃请求后，VoiceStudio 的 `/v1/audio/speech` 不会中止生成，
+后续请求需排队等它完成。
 
 ## 测试
 

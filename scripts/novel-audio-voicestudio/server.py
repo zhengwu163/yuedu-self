@@ -48,6 +48,7 @@ def build_gateway(config):
         voice_resolver=lambda voice_id: {
             "voice": registry.resolve(voice_id).provider_ref,
         },
+        request_timeout=config.request_timeout,
     )
     if config.director_base_url and config.director_token:
         director = HttpDirectorProvider(
@@ -61,6 +62,7 @@ def build_gateway(config):
         director=director,
         token=config.token,
         registry=registry,
+        request_timeout=config.request_timeout,
     )
 
 

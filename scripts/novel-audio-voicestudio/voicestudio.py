@@ -111,6 +111,7 @@ class VoiceStudioSpeechProvider:
             raise ProtocolError() from None
 
         result = []
+        tags = self._profile_tags()
         for item in items:
             if not isinstance(item, dict) or item.get("type") != "profile":
                 continue
@@ -122,18 +123,45 @@ class VoiceStudioSpeechProvider:
                 name = voice_id
             voice_asset_id = "voicestudio.profile." + voice_id
             self._profile_refs[voice_asset_id] = voice_id
+            profile_tags = tags.get(voice_id, ())
             result.append(VoiceAsset(
                 voice_asset_id=voice_asset_id,
                 display_name=name,
-                gender=_optional_string(item.get("gender"), "unknown"),
+                gender=_optional_string(
+                    item.get("gender"),
+                    _tag_value(profile_tags, _GENDER_TAGS, "unknown"),
+                ),
                 age_range=_optional_string(
                     item.get("ageRange", item.get("age_range")),
-                    "adult",
+                    _tag_value(profile_tags, _AGE_TAGS, "adult"),
                 ),
                 traits=tuple(_optional_strings(item.get("traits", []))),
                 preview_available=True,
             ))
         return result
+
+    def _profile_tags(self):
+        """读取 /profiles 的 instruct 标签；只用于补全匹配元数据，失败不影响发现。"""
+        try:
+            status, _, body = self.transport("GET", "/profiles", None)
+            if status != 200:
+                return {}
+            profiles = strict_json_loads(body)
+        except (ProviderError, ProtocolError, ValueError):
+            return {}
+        if not isinstance(profiles, list):
+            return {}
+        tags = {}
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            profile_id, instruct = profile.get("id"), profile.get("instruct")
+            if isinstance(profile_id, str) and isinstance(instruct, str):
+                tags[profile_id] = tuple(
+                    tag.strip().lower()
+                    for tag in instruct.replace("，", ",").split(",")
+                )
+        return tags
 
     def provider_ref_for(self, voice_asset_id):
         try:
@@ -348,6 +376,24 @@ def _invoke_transport(transport, method, path, payload, context):
 
 def _optional_string(value, fallback):
     return value if isinstance(value, str) and value.strip() else fallback
+
+
+# VoiceStudio 音色设计标签（英文与中文两套写法）到 v1 匹配约束取值的映射。
+_GENDER_TAGS = {"male": "male", "男": "male", "female": "female", "女": "female"}
+_AGE_TAGS = {
+    "child": "child", "儿童": "child",
+    "teenager": "teen", "少年": "teen",
+    "young adult": "young_adult", "青年": "young_adult",
+    "middle-aged": "adult", "中年": "adult",
+    "elderly": "elderly", "老年": "elderly",
+}
+
+
+def _tag_value(tags, mapping, fallback):
+    for tag in tags:
+        if tag in mapping:
+            return mapping[tag]
+    return fallback
 
 
 def _optional_strings(value):

@@ -210,6 +210,66 @@ class VoiceStudioProviderTest(unittest.TestCase):
         self.assertEqual("/v1/audio/voices", transport.calls[0][1])
         self.assertNotIn("voice_id", voices[0].as_dict())
 
+    def test_profile_design_tags_fill_gender_and_age_for_matching(self):
+        # /v1/audio/voices 不带性别年龄；真实 VoiceStudio 0.5.6 只在 /profiles
+        # 的 instruct 标签里保存设计音色的性别与年龄，缺失会让角色自动选音失效。
+        responses = {
+            "/v1/audio/voices": json_bytes({"voices": [
+                {"voice_id": "n1", "name": "旁白", "type": "profile"},
+                {"voice_id": "f1", "name": "女声", "type": "profile"},
+                {"voice_id": "c1", "name": "克隆", "type": "profile"},
+            ]}),
+            "/profiles": json_bytes([
+                {"id": "n1", "instruct": "male, middle-aged, low pitch"},
+                {"id": "f1", "instruct": "女, 青年, 高音调"},
+                {"id": "c1", "instruct": ""},
+            ]),
+        }
+        calls = []
+
+        def transport(method, path, payload=None):
+            calls.append((method, path))
+            return 200, {"Content-Type": "application/json"}, responses[path]
+
+        provider = VoiceStudioSpeechProvider(
+            base_url="http://127.0.0.1:3900",
+            token="local-token",
+            profile="voice-studio-engine-v1",
+            voice_resolver=lambda voice_id: {"voice": voice_id},
+            transport=transport,
+        )
+
+        voices = {voice.display_name: voice for voice in provider.voices()}
+
+        self.assertEqual(("male", "adult"), (
+            voices["旁白"].gender, voices["旁白"].age_range))
+        self.assertEqual(("female", "young_adult"), (
+            voices["女声"].gender, voices["女声"].age_range))
+        self.assertEqual(("unknown", "adult"), (
+            voices["克隆"].gender, voices["克隆"].age_range))
+        self.assertIn(("GET", "/profiles"), calls)
+
+    def test_profile_metadata_failure_keeps_discovered_voices(self):
+        def transport(method, path, payload=None):
+            if path == "/profiles":
+                return 500, {}, b""
+            return 200, {"Content-Type": "application/json"}, json_bytes({
+                "voices": [{"voice_id": "n1", "name": "旁白", "type": "profile"}],
+            })
+
+        provider = VoiceStudioSpeechProvider(
+            base_url="http://127.0.0.1:3900",
+            token="local-token",
+            profile="voice-studio-engine-v1",
+            voice_resolver=lambda voice_id: {"voice": voice_id},
+            transport=transport,
+        )
+
+        voices = provider.voices()
+
+        self.assertEqual(["旁白"], [voice.display_name for voice in voices])
+        self.assertEqual("unknown", voices[0].gender)
+
     def test_provider_maps_remote_errors_to_sanitized_errors(self):
         for status in (401, 403, 500):
             with self.subTest(status=status):
