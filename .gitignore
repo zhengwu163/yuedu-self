@@ -299,3 +299,6 @@ git_log.txt
 
 # 本地 brainstorm 可视化会话产物
 /.superpowers/
+
+# Windows 侧交接压缩包（本地传递用，不入库）
+/NovelAudioLocalStage*.zip
