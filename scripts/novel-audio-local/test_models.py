@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from model_registry import ModelRegistry, ModelRegistryError
+from test_support import requires_symlinks
 
 
 class ModelRegistryTest(unittest.TestCase):
@@ -212,6 +213,7 @@ class ModelRegistryTest(unittest.TestCase):
 
             self.assertEqual("symlink_asset", caught.exception.code)
 
+    @requires_symlinks
     def test_symlinked_parent_model_asset_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

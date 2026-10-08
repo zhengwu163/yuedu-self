@@ -42,6 +42,11 @@
 v1 与 runtime 端点及 Windows 运维脚本。macOS 验证：本地服务 289/289、百炼桥接 79/79、
 假后端三角色 smoke 通过、commit gates exit 0。Windows 真实 7B smoke 未执行。
 
+Windows 首次离线自检（294 项，2 失败 18 错误）暴露两处真实缺陷并已修复：
+Worker 管道沿用系统代码页（中文 Windows 为 GBK），与 Agent 的 UTF-8 不一致，中文正文会损坏；
+Worker 在 taskkill 前自行退出时，清理被误判为失败。其余为宿主差异：无权限创建符号链接的
+用例改为跳过，POSIX 专用与平台分支用例固定所测分支。Windows 复跑结果待回填。
+
 额度并发用例 `test_quota_reservation_atomic_across_instances` 本次定向连跑 30 次均通过，
 仅说明当前未复现，不作为已修复结论。
 

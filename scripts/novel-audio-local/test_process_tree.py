@@ -1,3 +1,4 @@
+import os
 import signal
 import subprocess
 import unittest
@@ -43,6 +44,7 @@ class ProcessTreeTest(unittest.TestCase):
         self.assertEqual([["taskkill", "/PID", "4242", "/T", "/F"]], commands)
         self.assertGreaterEqual(process.wait_count, 2)
 
+    @unittest.skipUnless(os.name == "posix", "process groups and SIGKILL are POSIX-only")
     def test_posix_cleanup_targets_process_group_then_escalates(self):
         process = FakeProcess()
         sent = []

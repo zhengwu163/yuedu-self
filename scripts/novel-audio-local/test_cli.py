@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import checks
 import server
 
 
@@ -153,12 +154,17 @@ class LocalCliTest(unittest.TestCase):
             self.assertNotIn("agent-token", output.getvalue())
 
     def test_check_reports_missing_windows_runtime_without_loading_models(self):
+        # Pin the non-Windows branch: on a Windows host the real runtime probe
+        # would run and the expected "windows_only" code would never appear.
         with tempfile.TemporaryDirectory() as directory:
             config_path = Path(directory) / "local-model.json"
             value = self._config_value(directory)
             config_path.write_text(json.dumps(value), encoding="utf-8")
             output = io.StringIO()
-            with contextlib.redirect_stdout(output):
+            with patch.object(server, "WINDOWS", False), patch.object(
+                server, "run_checks",
+                lambda path: checks.run_checks(path, platform_name="posix"),
+            ), contextlib.redirect_stdout(output):
                 result = server.main(["--check", "--config", str(config_path)])
             self.assertEqual(2, result)
             report = json.loads(output.getvalue())
@@ -243,7 +249,10 @@ class LocalCliTest(unittest.TestCase):
             server._pid_is_running = lambda pid: False
             try:
                 output = io.StringIO()
-                with contextlib.redirect_stdout(output):
+                # The marker protocol is the POSIX branch; Windows delegates to
+                # stop-agent.ps1, which has its own operator coverage.
+                with patch.object(server, "WINDOWS", False), \
+                        contextlib.redirect_stdout(output):
                     result = server.main(["--stop", "--config", str(config_path)])
             finally:
                 server._pid_is_running = original_probe

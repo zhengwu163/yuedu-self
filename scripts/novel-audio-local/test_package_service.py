@@ -11,6 +11,8 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from test_support import requires_symlinks
+
 
 class ServiceBundleTest(unittest.TestCase):
     def setUp(self):
@@ -61,6 +63,7 @@ class ServiceBundleTest(unittest.TestCase):
                 build_bundle(root, target)
             self.assertEqual(b"preserve", target.read_bytes())
 
+    @requires_symlinks
     def test_symlink_or_missing_source_fails_without_partial_archive(self):
         from package_service import SOURCE_FILES, build_bundle
         with tempfile.TemporaryDirectory() as directory:
@@ -80,6 +83,7 @@ class ServiceBundleTest(unittest.TestCase):
                 build_bundle(root, target)
             self.assertFalse(target.exists())
 
+    @requires_symlinks
     def test_parent_symlink_cannot_bypass_source_allowlist(self):
         from package_service import build_bundle
         with tempfile.TemporaryDirectory() as directory:
@@ -94,6 +98,7 @@ class ServiceBundleTest(unittest.TestCase):
                 build_bundle(root, target)
             self.assertFalse(target.exists())
 
+    @requires_symlinks
     def test_target_parent_symlink_is_rejected(self):
         from package_service import build_bundle
         with tempfile.TemporaryDirectory() as directory:

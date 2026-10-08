@@ -1,6 +1,7 @@
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import threading
@@ -9,11 +10,30 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from scripts.novel_audio_server.errors import WorkerStartError
+from scripts.novel_audio_server.errors import WorkerStartError, WorkerUnavailableError
 from worker import SubprocessWorker, SubprocessWorkerFactory
 
 
 ROOT = Path(__file__).resolve().parent
+
+
+class _ExitingProcess:
+    """Process double for the Windows taskkill path; never spawns anything."""
+
+    pid = 4242
+
+    def __init__(self, exits):
+        self.exits = exits
+        self.wait_count = 0
+
+    def poll(self):
+        return None
+
+    def wait(self, timeout=None):
+        self.wait_count += 1
+        if not self.exits:
+            raise subprocess.TimeoutExpired("worker", timeout)
+        return 0
 
 
 class WorkerProcessTest(unittest.TestCase):
@@ -72,6 +92,39 @@ class WorkerProcessTest(unittest.TestCase):
                 worker.close()
                 self.assertLess(time.monotonic() - started, 2.0)
             self.assertIsNotNone(worker.process.poll())
+
+    def test_fake_worker_round_trip_survives_non_utf8_console_code_page(self):
+        # Windows pipes default to the ANSI code page (GBK on Chinese systems);
+        # the Agent always speaks UTF-8, so the Worker must not inherit the locale.
+        with tempfile.TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"PYTHONIOENCODING": "gbk"}):
+            config_path = self._config(directory)
+            worker = SubprocessWorkerFactory(
+                config_path, fake=True, expected_identity="fake-local-v1"
+            ).start("fake-local-v1")
+            try:
+                response = worker.analyze(self._request())
+                self.assertEqual(["u1"], [item["unitId"] for item in response["assignments"]])
+            finally:
+                worker.close()
+
+    def test_windows_cleanup_accepts_worker_that_exits_before_taskkill(self):
+        # The Worker can exit between poll() and taskkill; taskkill then fails
+        # although the process is already gone, which is a clean stop.
+        worker = SubprocessWorker.__new__(SubprocessWorker)
+        worker.process = _ExitingProcess(exits=True)
+        with patch("worker.os", type("WindowsOs", (), {"name": "nt"})), \
+                patch("worker.subprocess.run", return_value=type("Result", (), {"returncode": 128})()):
+            worker._terminate_tree()
+        self.assertEqual(1, worker.process.wait_count)
+
+    def test_windows_cleanup_fails_when_taskkill_fails_and_worker_survives(self):
+        worker = SubprocessWorker.__new__(SubprocessWorker)
+        worker.process = _ExitingProcess(exits=False)
+        with patch("worker.os", type("WindowsOs", (), {"name": "nt"})), \
+                patch("worker.subprocess.run", return_value=type("Result", (), {"returncode": 1})()):
+            with self.assertRaises(WorkerUnavailableError):
+                worker._terminate_tree()
 
     def test_fake_worker_profile_mismatch_fails_startup(self):
         with tempfile.TemporaryDirectory() as directory:

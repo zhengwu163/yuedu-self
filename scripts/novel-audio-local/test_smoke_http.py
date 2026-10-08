@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.novel_audio_server.protocol import analysis_request, synthesis_request
+from test_support import requires_symlinks
 
 
 class FakeHttpAgent:
@@ -511,6 +512,7 @@ class SmokeHttpTest(unittest.TestCase):
         self.assertEqual(2, len(list((self.root / "diagnostics").iterdir())))
         self.assertEqual(snapshot, {p.name: p.read_bytes() for p in first.iterdir()})
 
+    @requires_symlinks
     def test_diagnostics_symlink_is_rejected(self):
         target = self.root / "other"
         target.mkdir()

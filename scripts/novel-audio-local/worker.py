@@ -301,7 +301,10 @@ class SubprocessWorker:
                     timeout=2, check=False,
                 )
                 if result.returncode != 0:
-                    raise WorkerUnavailableError()
+                    # The Worker may exit between poll() and taskkill; taskkill
+                    # then fails although the stop already happened.
+                    self.process.wait(timeout=1)
+                    return
                 self.process.wait(timeout=1)
             except subprocess.TimeoutExpired:
                 raise WorkerUnavailableError() from None
@@ -416,6 +419,10 @@ def _ready_response(backend):
 
 
 def _worker_main(config_path, fake, profile_id):
+    # Windows pipes default to the ANSI code page (GBK on Chinese systems), but
+    # the Agent always reads and writes UTF-8; chapter text would be corrupted.
+    for stream in (sys.stdin, sys.stdout):
+        stream.reconfigure(encoding="utf-8")
     try:
         with redirect_stdout(sys.stderr):
             backend = _load_backend(config_path, fake, profile_id)

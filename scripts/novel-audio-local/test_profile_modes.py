@@ -16,6 +16,7 @@ from unittest.mock import Mock, patch
 from qwen_backend import QwenBackend, QwenTtsAdapter
 from scripts.novel_audio_server.errors import MissingReferenceAudioError
 from scripts.novel_audio_server.protocol import MAX_AUDIO
+from test_support import requires_symlinks
 from voices import VoiceCatalog, VoiceCatalogError
 
 
@@ -135,6 +136,7 @@ class ProfileModesTest(unittest.TestCase):
                 self.assert_catalog_error("invalid_reference_audio", lambda: catalog.validate_references(["voice-clone"]))
                 self.assertEqual([], catalog.public_voices(["voice-clone"]))
 
+    @requires_symlinks
     def test_symlink_file_is_invalid_even_if_target_is_inside_root(self):
         target = self.root / "target.wav"
         target.write_bytes(wav_bytes())
@@ -143,12 +145,14 @@ class ProfileModesTest(unittest.TestCase):
         catalog = self.catalog()
         self.assert_catalog_error("invalid_reference_audio", lambda: catalog.validate_references(["voice-clone"]))
 
+    @requires_symlinks
     def test_symlink_parent_is_invalid_even_if_target_is_inside_root(self):
         link = self.root / "link"
         link.symlink_to(self.reference.parent, target_is_directory=True)
         catalog = self.catalog("link/reference.wav")
         self.assert_catalog_error("invalid_reference_audio", lambda: catalog.validate_references(["voice-clone"]))
 
+    @requires_symlinks
     def test_symlink_root_is_invalid(self):
         catalog = self.catalog()
         link = self.root / "root-link"
@@ -156,6 +160,7 @@ class ProfileModesTest(unittest.TestCase):
         linked = VoiceCatalog(catalog.path, link)
         self.assert_catalog_error("invalid_reference_audio", lambda: linked.validate_references(["voice-clone"]))
 
+    @requires_symlinks
     def test_rechecks_symlink_after_catalog_load(self):
         catalog = self.catalog()
         self.reference.unlink()

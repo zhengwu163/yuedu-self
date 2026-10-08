@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from test_support import requires_symlinks
+
 
 class StateLockTest(unittest.TestCase):
     def test_same_state_directory_cannot_have_two_owners(self):
@@ -20,6 +22,7 @@ class StateLockTest(unittest.TestCase):
             second.close()
             second.close()
 
+    @requires_symlinks
     def test_symlinked_state_is_rejected(self):
         from state_lock import StateLock
 
@@ -32,6 +35,7 @@ class StateLockTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 StateLock(link).acquire()
 
+    @requires_symlinks
     def test_symlinked_state_files_are_rejected(self):
         from state_lock import StateLock
 

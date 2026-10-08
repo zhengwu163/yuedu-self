@@ -16,6 +16,7 @@ from scripts.novel_audio_server.errors import (
 )
 from model_registry import ModelAsset, RuntimeProfile
 from qwen_backend import QwenBackend, QwenTextAdapter, QwenTtsAdapter
+from test_support import requires_symlinks
 from voices import VoiceCatalog
 
 
@@ -180,6 +181,7 @@ class LocalBackendTest(unittest.TestCase):
                 with self.assertRaises(ConfigError):
                     load_config(path)
 
+    @requires_symlinks
     def test_config_rejects_symlinked_private_paths_before_resolve(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
