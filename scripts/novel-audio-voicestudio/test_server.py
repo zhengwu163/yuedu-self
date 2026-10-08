@@ -1,12 +1,55 @@
+import contextlib
+import io
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import server
 from config import load_config
-from errors import ProviderError
+from errors import AuthenticationError, ProviderError, ProviderTimeoutError
 from models import VoiceAsset
 from registry import VoiceRegistry
 from server import _load_registry, _profile_revision, validate_bind_host
+
+
+class StartupCheckTest(unittest.TestCase):
+    ENV = {
+        "NOVEL_AUDIO_TOKEN": "gateway-secret",
+        "VOICESTUDIO_BASE_URL": "http://127.0.0.1:3901",
+        "VOICESTUDIO_TOKEN": "voicestudio-secret",
+    }
+
+    def run_check(self, env, failure=None):
+        stderr = io.StringIO()
+        build = patch.object(server, "build_gateway", side_effect=failure)
+        with patch.dict(os.environ, env, clear=True), build, \
+                contextlib.redirect_stderr(stderr):
+            code = server.main(["--check"])
+        return code, stderr.getvalue()
+
+    def test_provider_failures_exit_with_operator_hint_not_traceback(self):
+        cases = (
+            (ProviderError(), "VOICESTUDIO_BASE_URL"),
+            (ProviderTimeoutError(), "did not respond"),
+            (AuthenticationError(), "VOICESTUDIO_TOKEN"),
+        )
+        for failure, hint in cases:
+            with self.subTest(failure=type(failure).__name__):
+                code, output = self.run_check(self.ENV, failure)
+                self.assertEqual(1, code)
+                self.assertIn(hint, output)
+                self.assertNotIn("Traceback", output)
+                self.assertNotIn("secret", output)
+
+    def test_invalid_config_exits_with_variable_name_only(self):
+        env = dict(self.ENV)
+        del env["NOVEL_AUDIO_TOKEN"]
+        code, output = self.run_check(env)
+        self.assertEqual(1, code)
+        self.assertIn("NOVEL_AUDIO_TOKEN is required", output)
+        self.assertNotIn("secret", output)
 
 
 class ServerConfigTest(unittest.TestCase):

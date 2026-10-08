@@ -4,6 +4,7 @@ import hashlib
 import json
 import select
 import socket
+import sys
 import threading
 import time
 from pathlib import Path
@@ -12,7 +13,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from config import load_config
 from director import ConfiguredDirectorProvider
 from director_http import HttpDirectorProvider
-from errors import ProviderError, ProviderTimeoutError
+from errors import (
+    AuthenticationError, ProviderError, ProviderTimeoutError, ServiceError,
+)
 from gateway import NovelAudioGateway
 from lifecycle import RequestContext
 from protocol import MAX_JSON, strict_json_loads
@@ -314,27 +317,44 @@ def create_server(config, gateway):
     return Server((config.host, config.port), Handler)
 
 
+def _startup_failure(error):
+    """把启动期失败转成面向运维的一行提示；只含变量名，不回显 Token 等取值。"""
+    if isinstance(error, AuthenticationError):
+        return "VoiceStudio rejected the request; check VOICESTUDIO_TOKEN"
+    if isinstance(error, ProviderTimeoutError):
+        return "VoiceStudio did not respond in time"
+    if isinstance(error, ServiceError):
+        return ("VoiceStudio is unreachable or returned an error; confirm the "
+                "Local API is running at VOICESTUDIO_BASE_URL")
+    return str(error) or "invalid configuration or VoiceStudio voice list"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--serve", action="store_true")
     args = parser.parse_args(argv)
-    config = load_config()
-    if args.check:
+    if not (args.check or args.serve):
+        parser.error("choose --check or --serve")
+    try:
+        config = load_config()
         gateway = build_gateway(config)
+        server = None if args.check else create_server(config, gateway)
+    except (ServiceError, ValueError) as error:
+        print("NovelAudio VoiceStudio startup failed: " + _startup_failure(error),
+              file=sys.stderr)
+        return 1
+    if args.check:
         print(json.dumps(gateway._health()[2], ensure_ascii=False))
         return 0
-    if args.serve:
-        server = create_server(config, build_gateway(config))
-        try:
-            print("NovelAudio VoiceStudio server ready")
-            server.serve_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            server.server_close()
-        return 0
-    parser.error("choose --check or --serve")
+    try:
+        print("NovelAudio VoiceStudio server ready")
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 
 if __name__ == "__main__":
