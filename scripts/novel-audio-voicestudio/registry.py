@@ -102,16 +102,24 @@ class VoiceRegistry:
             )
         wanted = set(request.traits)
         used = set(request.already_used_voice_ids)
+        # “unknown”/空值表示分析方不确定，不应偏向同样未标注的音色。
+        constraints = {
+            key: value for key, value in request.constraints.items()
+            if value and value != "unknown"
+        }
+
+        def miss(voice, key):
+            return key in constraints and (
+                constraints[key] != getattr(voice, _constraint_attribute(key))
+            )
 
         def score(record):
             voice = record.public
-            constraint_misses = sum(
-                value != getattr(voice, _constraint_attribute(key))
-                for key, value in request.constraints.items()
-            )
+            # 性别不符比年龄不符更影响听感，必须优先排序。
             return (
                 voice.voice_asset_id in used,
-                constraint_misses,
+                miss(voice, "gender"),
+                miss(voice, "ageRange"),
                 -len(wanted & set(voice.traits)),
                 voice.voice_asset_id,
             )

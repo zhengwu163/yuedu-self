@@ -54,6 +54,60 @@ class VoiceRegistryTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual("voicestudio.male", first[0]["voiceAssetId"])
 
+    def test_gender_match_outranks_age_match(self):
+        # 真实联调复现：成年男角色曾被分配到性别未知的英文演示音色，
+        # 因为“性别不符”与“年龄不符”各算一次未命中后按 ID 排序打平。
+        registry = VoiceRegistry.from_records([
+            {
+                "voiceAssetId": "voicestudio.profile.demo0001",
+                "displayName": "演示音色",
+                "providerRef": "demo0001",
+                "gender": "unknown",
+                "ageRange": "adult",
+                "traits": [],
+            },
+            {
+                "voiceAssetId": "voicestudio.profile.ffbc7c5f",
+                "displayName": "青年男声",
+                "providerRef": "ffbc7c5f",
+                "gender": "male",
+                "ageRange": "young_adult",
+                "traits": [],
+            },
+        ])
+
+        candidates = registry.match(
+            {"traits": []}, [], {"gender": "male", "ageRange": "adult"},
+        )
+
+        self.assertEqual("voicestudio.profile.ffbc7c5f", candidates[0]["voiceAssetId"])
+
+    def test_unknown_constraint_does_not_prefer_unknown_voices(self):
+        registry = VoiceRegistry.from_records([
+            {
+                "voiceAssetId": "voicestudio.a-female",
+                "displayName": "女声",
+                "providerRef": "female",
+                "gender": "female",
+                "ageRange": "adult",
+                "traits": ["温柔"],
+            },
+            {
+                "voiceAssetId": "voicestudio.b-unknown",
+                "displayName": "未标注",
+                "providerRef": "unknown",
+                "gender": "unknown",
+                "ageRange": "adult",
+                "traits": [],
+            },
+        ])
+
+        candidates = registry.match(
+            {"traits": ["温柔"]}, [], {"gender": "unknown", "ageRange": "unknown"},
+        )
+
+        self.assertEqual("voicestudio.a-female", candidates[0]["voiceAssetId"])
+
     def test_registry_round_trip_preserves_profile_revision(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "voices.json"

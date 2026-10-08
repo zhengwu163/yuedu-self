@@ -47,6 +47,9 @@ VoiceStudio 管理接口。
 Android 现有连接测试要求 `directorReady` 和 `ttsReady` 同时为 true。
 仅做 TTS 独立开发可以不配置 Director；接入 Android 前须配置并实际验证
 提供 `/v1/chapter/analyze` 的 `DIRECTOR_BASE_URL` 与 `DIRECTOR_TOKEN`。
+已验证可用百炼临时桥接充当 Director：`DIRECTOR_BASE_URL=http://127.0.0.1:8787`，
+`DIRECTOR_TOKEN` 取 `novel-audio.local.connection.json` 中的 `token`；每次章节分析
+都会消耗百炼额度。
 
 ## 启动
 

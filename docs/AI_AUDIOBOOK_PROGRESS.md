@@ -30,22 +30,30 @@ Director 实际健康探测和发现失败时的 registry fail-closed。
 （源码 tag v0.5.6 headless 运行，默认引擎 OmniVoice，模型 3.27 GB 校验 SHA-256），
 并通过适配层完成真实链路：`--check` 返回 `ttsReady=true`，发现 3 个中文设计
 音色（旁白沉稳男声、青年男声、青年女声）加 1 个英文演示音色；preview、三角色
-合成和 90 字长段落均返回 Ogg/Opus，`X-TTS-Profile` 一致。试听文件在已忽略的
-`novel-audio-voicestudio.local.smoke/`，**主观听感待用户确认**。
+合成和 90 字长段落均返回 Ogg/Opus，`X-TTS-Profile` 一致。用户已于 2026-10-08
+试听确认三种音色可接受。
 
-真实联调暴露并已修复三处问题（离线测试 62 项）：
+人物分析接入百炼临时桥接（`127.0.0.1:8787`，qwen3.7-plus，用户确认免费额度保护后
+授权）后，适配层健康检查 `directorReady=true`、`ttsReady=true`，满足 Android 连接
+测试条件。用一段 5 句原创短文走完整链路：章节分析 1 次（6.3 秒）识别出林舟（男）
+与苏晚（女）并给出逐句归属，按性别匹配到青年男声/青年女声，旁白用沉稳男声，
+5 句合成均成功，拼成约 24 秒的整章试听文件。
+
+真实联调暴露并已修复四处问题（离线测试 64 项）：
 
 - 整请求截止时间原为固定 20 秒，90 字段落在 M2 上需约 31 秒，必定 504；新增
   `NOVEL_AUDIO_REQUEST_TIMEOUT`（默认 40 秒，须小于 Android 45 秒调用超时）。
 - `/v1/audio/voices` 不带性别年龄，所有音色都是 unknown，角色自动选音无法区分
   男女；现从 `/profiles` 的设计标签补全，男女角色已能各自匹配到对应音色。
 - VoiceStudio 未启动时 `--check/--serve` 打印 Python 堆栈；现输出一行提示并退出 1。
+- 选音时“性别不符”和“年龄不符”同权，成年男角色被分到性别未知的英文演示音色；
+  现性别优先于年龄，且分析方给出 `unknown` 时不再偏向未标注音色。
 
 已知限制（VoiceStudio 侧，适配层无法修复）：客户端放弃请求后，VoiceStudio 的
 `/v1/audio/speech` 不会中止生成；实测放弃一段长文本后，下一句短文本排队等了
 约 35 秒。M2 上合成耗时约为音频时长的 1.7 倍，单段约 110 字以内才能在 40 秒内完成。
 
-最近一次验证：VoiceStudio 62/62、百炼桥接 79/79、Mock 7/7，测试配对门禁
+最近一次验证：VoiceStudio 64/64、百炼桥接 79/79、Mock 7/7，测试配对门禁
 （含未跟踪文件）和 commit 静态门禁均 exit 0。
 
 百炼桥接 `test_quota_reservation_atomic_across_instances` 的偶发失败已定位：
@@ -56,9 +64,8 @@ Director 实际健康探测和发现失败时的 registry fail-closed。
 
 Phase 1 剩余事项：
 
-- 用户试听确认三角色音色是否可接受。
-- 仍需在真实 Director 服务上验证 `/v1/health` 与章节分析联调；未配置时
-  `directorReady=false`，Android 连接测试要求两者同时为 true。
+- 人物分析目前借用百炼临时桥接，需真实云额度；本地模型版 Director 待
+  Windows 部署时替换。
 - Android 真机联调与 Windows RTX 5090D v2 部署尚未开始。
 
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
