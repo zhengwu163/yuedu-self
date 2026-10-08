@@ -634,6 +634,21 @@ class NovelAudioServerClientTest {
         }
     }
 
+    @Test fun `analysis budget outlasts bridge worker deadline`() = runBlocking {
+        // 百炼非流式分析真机实测 15～40 秒以上，桥接 worker 硬期限 90 秒；
+        // 手机必须更晚超时，才能收到桥接返回的固定错误码而不是自己先报 TIMEOUT。
+        assertTrue(NovelAudioServerClient.ANALYSIS_TIMEOUT_MILLIS > 90_000)
+        assertTrue(
+            NovelAudioServerClient.ANALYSIS_TIMEOUT_MILLIS <= NovelAudioServerClient.MAX_TIMEOUT_MILLIS
+        )
+        val url = "http://127.0.0.1:${server.listeningPort}"
+        NovelAudioServerClient(url, { "test-secret" }, NovelAudioServerClient.ANALYSIS_TIMEOUT_MILLIS)
+        expectError("CONFIG") {
+            NovelAudioServerClient(url, { "test-secret" }, NovelAudioServerClient.MAX_TIMEOUT_MILLIS + 1)
+        }
+        Unit
+    }
+
     @Test fun `cancellation propagates instead of becoming unavailable`() = runBlocking {
         val started = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)

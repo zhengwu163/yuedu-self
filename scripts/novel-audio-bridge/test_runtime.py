@@ -351,7 +351,10 @@ except KeyboardInterrupt:
         command, payload, timeout = captured[0]
         self.assertNotIn("hidden-key", str(command))
         self.assertIn(b"hidden-key", payload)
-        self.assertLessEqual(timeout, 40)
+        # worker 硬期限要略长于云端分析预算（85 秒），又必须短于 Android 100 秒读超时，
+        # 这样手机才能收到桥接的固定错误码而不是自己先超时。
+        self.assertGreaterEqual(timeout, 85)
+        self.assertLessEqual(timeout, 90)
 
 
 if __name__ == "__main__":

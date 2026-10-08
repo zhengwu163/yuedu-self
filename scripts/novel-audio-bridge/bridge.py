@@ -1,6 +1,7 @@
 """NovelAudioServer v1 的业务适配边界。"""
 import hmac
 import threading
+import time
 
 from local_state import BridgeConfig, UsageGuard
 from protocol import (
@@ -11,9 +12,11 @@ from protocol import (
 
 
 class BridgeApi:
-    def __init__(self, config, cloud, usage, ffmpeg_available):
+    def __init__(self, config, cloud, usage, ffmpeg_available, log=None):
         self.config, self.cloud, self.usage = config, cloud, usage
         self.ffmpeg_available = ffmpeg_available
+        # 只接收固定诊断行；正文、ID、Key、Token 与供应商原文不进入日志。
+        self.log = log or (lambda _: None)
         self.catalog = VoiceCatalog()
         self._generation = threading.Lock()
         self._quota_blocked = False
@@ -72,19 +75,23 @@ class BridgeApi:
         # 单生成请求，不等待本地队列，避免客户端已超时后后台继续批量消耗。
         if not self._generation.acquire(blocking=False):
             return self.error(429, "busy")
+        started, status, code = time.monotonic(), 500, "internal"
         try:
             if path == "/v1/chapter/analyze":
                 self.usage.reserve("analysis", sum(utf16_length(u["text"]) for u in request["units"]))
                 response = self.cloud.analyze(request)
-                return 200, headers, analysis_response(response, request)
-            text = request["text"]
-            self.usage.reserve("tts", utf16_length(text), requests=(len(text) + 599) // 600)
-            audio = self.cloud.synthesize(request)
-            if not isinstance(audio, bytes) or not 0 < len(audio) <= MAX_AUDIO:
-                raise CloudProtocolError()
-            return 200, {"Content-Type": "audio/ogg",
-                         "X-TTS-Profile": getattr(self.cloud, "profile",
-                                                 "bailian-qwen3-tts-instruct-flash-v1-test")}, audio
+                result = 200, headers, analysis_response(response, request)
+            else:
+                text = request["text"]
+                self.usage.reserve("tts", utf16_length(text), requests=(len(text) + 599) // 600)
+                audio = self.cloud.synthesize(request)
+                if not isinstance(audio, bytes) or not 0 < len(audio) <= MAX_AUDIO:
+                    raise CloudProtocolError()
+                result = 200, {"Content-Type": "audio/ogg",
+                               "X-TTS-Profile": getattr(self.cloud, "profile",
+                                                       "bailian-qwen3-tts-instruct-flash-v1-test")}, audio
+            status, code = 200, "ok"
+            return result
         except CloudQuotaError:
             # 写盘失败也不能重新放行；内存熔断优先于持久化。
             self._quota_blocked = True
@@ -92,13 +99,30 @@ class BridgeApi:
                 self.usage.block_cloud_quota()
             except LocalQuotaError:
                 pass
-            return self.error(429, "free_quota_only")
+            status, code = 429, "free_quota_only"
+            return self.error(status, code)
         except BridgeError as error:
-            return self.error(error.status, error.code)
+            status, code = error.status, error.code
+            return self.error(status, code)
         except (ValueError, TypeError, KeyError, OverflowError, RecursionError):
-            return self.error(502, "invalid_cloud_response")
+            status, code = 502, "invalid_cloud_response"
+            return self.error(status, code)
         finally:
             self._generation.release()
+            self._log_generation(path, request, status, code, started)
+
+    def _log_generation(self, path, request, status, code, started):
+        if path == "/v1/chapter/analyze":
+            units = len(request["units"])
+            chars = sum(utf16_length(u["text"]) for u in request["units"])
+        else:
+            units, chars = 1, utf16_length(request["text"])
+        try:
+            self.log(f"生成请求 {path[len('/v1/'):]} status={status} code={code} "
+                     f"units={units} utf16={chars} elapsed={time.monotonic() - started:.1f}s")
+        except Exception:
+            # 诊断输出失败不能改变已经确定的响应。
+            pass
 
 
 # 公共入口兼容：CLI 和单测可以从 bridge 导入客户端，内部网络模块与协议隔离。

@@ -171,7 +171,8 @@ def main(argv=None):
         print("App 本地连接信息已保存至 novel-audio.local.connection.json（不含百炼 Key）。")
         if not (args.serve or args.smoke or args.smoke_tts):
             return 0
-        api = BridgeApi(config, CloudWorker(config, profile), UsageGuard(config.state_path), True)
+        api = BridgeApi(config, CloudWorker(config, profile), UsageGuard(config.state_path), True,
+                        log=lambda line: print(line, flush=True))
         if args.smoke or args.smoke_tts:
             directory = args.config.parent / "novel-audio.local.smoke" / datetime.now().strftime("%Y%m%d-%H%M%S-%f")
             try:

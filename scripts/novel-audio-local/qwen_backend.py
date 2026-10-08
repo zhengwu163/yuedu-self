@@ -27,14 +27,17 @@ from scripts.novel_audio_server.errors import (
 from scripts.novel_audio_server.protocol import (
     MAX_JSON,
     analysis_response,
-    parse_analysis_json,
+    load_analysis_json,
+    model_analysis_request,
+    restore_model_unit_ids,
 )
 
 
 SYSTEM_PROMPT = (
-    "你是中文小说台词归属分析器。只返回 JSON，包含 assignments、newCharacters、"
-    "aliasUpdates 三个数组。每个 unitId 必须恰好出现一次；speakerId 只能是 narrator、"
-    "请求中的 characterId 或本响应的 temporaryId。"
+    "你是中文小说台词归属分析器。只返回 JSON，包含 assignments 对象与 newCharacters、"
+    "aliasUpdates 两个数组。assignments 以输入 unitId 为键、speakerId 为值，"
+    '例如 "assignments":{"u1":"narrator"}，每个 unitId 必须恰好出现一次；'
+    "speakerId 只能是 narrator、请求中的 characterId 或本响应的 temporaryId。"
 )
 
 REQUEST_TIMEOUT = 15.0
@@ -119,11 +122,13 @@ class QwenTextAdapter:
         ]
 
     def analyze(self, value):
+        # 模型只看短序号，回写后再按原请求严格校验，避免逐个复写哈希 ID。
+        model_request, aliases = model_analysis_request(value)
         payload = {
             "model": self.model_name,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(value, ensure_ascii=False)},
+                {"role": "user", "content": json.dumps(model_request, ensure_ascii=False)},
             ],
             "temperature": 0.1,
             "stream": False,
@@ -133,7 +138,7 @@ class QwenTextAdapter:
         response = self.request(payload)
         try:
             content = response["choices"][0]["message"]["content"]
-            parsed = parse_analysis_json(content)
+            parsed = restore_model_unit_ids(load_analysis_json(content), aliases)
             return analysis_response(parsed, value)
         except (KeyError, IndexError, TypeError, ValueError, OverflowError):
             raise InvalidBackendResponseError() from None

@@ -53,13 +53,13 @@ class NovelAudioServerException(val kind: String) : NoStackTraceException(
 class NovelAudioServerClient(
     baseUrl: String,
     private val tokenProvider: () -> String,
-    private val timeoutLimitMillis: Long = 45_000,
+    private val timeoutLimitMillis: Long = MAX_TIMEOUT_MILLIS,
     private val budgetLedger: NovelAudioBudgetLedger? = null
 ) {
     private val base = NovelAudioServerCredentials.parseBaseUrl(baseUrl)
 
     init {
-        if (timeoutLimitMillis !in 1..45_000) throw NovelAudioServerException("CONFIG")
+        if (timeoutLimitMillis !in 1..MAX_TIMEOUT_MILLIS) throw NovelAudioServerException("CONFIG")
     }
 
     suspend fun health(): ServerHealth = withContext(Dispatchers.IO) {
@@ -101,7 +101,7 @@ class NovelAudioServerClient(
         )
         return try {
             NovelAudioJson.analysis(
-                json("chapter/analyze", body, 45_000, leaseId, "POST"),
+                json("chapter/analyze", body, ANALYSIS_TIMEOUT_MILLIS, leaseId, "POST"),
                 request
             )
         } finally {
@@ -370,17 +370,25 @@ class NovelAudioServerClient(
     }
 
     companion object {
+        /**
+         * 分析是非流式补全，整份结果生成完才返回首字节；真机 64 单元批次实测 15～40 秒以上。
+         * 必须长于桥接 worker 的 90 秒硬期限，手机才能收到桥接的固定错误码。
+         */
+        internal const val ANALYSIS_TIMEOUT_MILLIS = 100_000L
+        /** 单次调用总时长上限；其余接口仍按各自更短的期限调用。 */
+        internal const val MAX_TIMEOUT_MILLIS = ANALYSIS_TIMEOUT_MILLIS
         private const val JSON_LIMIT = 2 * 1024 * 1024
         private const val AUDIO_LIMIT = 16 * 1024 * 1024
         private const val ERROR_BODY_LIMIT = 4096L
         private val gson = GsonBuilder().setStrictness(Strictness.STRICT).create()
         // 凭据通道不继承书源的宽松 TLS、诊断拦截器、cookie 或重定向逻辑。
+        // 读/总超时放到分析上限，逐次调用再用 call.timeout() 收紧到各自期限。
         private val http by lazy {
             OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)
-                .readTimeout(45, TimeUnit.SECONDS)
+                .readTimeout(MAX_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
                 .writeTimeout(15, TimeUnit.SECONDS)
-                .callTimeout(45, TimeUnit.SECONDS)
+                .callTimeout(MAX_TIMEOUT_MILLIS, TimeUnit.MILLISECONDS)
                 .followRedirects(false)
                 .followSslRedirects(false)
                 .retryOnConnectionFailure(false)

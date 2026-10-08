@@ -87,6 +87,38 @@ class CloudTest(unittest.TestCase):
         with self.assertRaises(CloudProtocolError):
             client.analyze(analysis())
 
+    def test_analysis_sends_short_unit_aliases_and_restores_android_ids(self):
+        request = analysis()
+        long_ids = ["u_" + "a1" * 32, "u_" + "b2" * 32]
+        for unit, unit_id in zip(request["units"], long_ids):
+            unit["unitId"] = unit_id
+        answer = {"assignments": {"u1": "narrator", "u2": "char_1"},
+                  "newCharacters": [], "aliasUpdates": []}
+        client, transport = self.client([response({"choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})])
+
+        result = client.analyze(request)
+
+        self.assertEqual(long_ids, [item["unitId"] for item in result["assignments"]])
+        messages = json.loads(transport.requests[0][0].data)["messages"]
+        self.assertIn('"assignments":{"u1":"narrator"', messages[0]["content"])
+        sent = messages[1]["content"]
+        self.assertIn('"u1"', sent)
+        for unit_id in long_ids:
+            self.assertNotIn(unit_id, sent)
+
+    def test_analysis_socket_timeout_covers_non_streaming_generation(self):
+        # 非流式补全要等整份 JSON 生成完才返回首字节；真机 64 单元批次实测 15～40 秒以上，
+        # 单次读超时必须覆盖整份分析预算，且仍短于 worker 硬期限。
+        answer = {"assignments": [], "newCharacters": [], "aliasUpdates": []}
+        client, transport = self.client([response({"choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})])
+
+        client.analyze(analysis())
+
+        self.assertGreaterEqual(transport.requests[0][1], 80)
+        self.assertLessEqual(transport.requests[0][1], 85)
+
     def test_tts_download_never_receives_api_key_and_https_is_forced(self):
         def runner(command, **kwargs):
             self.assertNotIn("cloud-secret", str(command))

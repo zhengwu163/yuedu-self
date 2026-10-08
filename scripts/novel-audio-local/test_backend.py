@@ -749,6 +749,50 @@ class LocalBackendTest(unittest.TestCase):
         with self.assertRaises(InvalidBackendResponseError):
             oversized._request({"messages": []})
 
+    def test_qwen_text_sends_short_unit_aliases_and_restores_android_ids(self):
+        long_ids = ["u_" + "a1" * 32, "u_" + "b2" * 32]
+        sent = []
+        content = {
+            "assignments": {"u2": "narrator", "u1": "narrator"},
+            "newCharacters": [],
+            "aliasUpdates": [],
+        }
+
+        def request(payload):
+            sent.append(payload["messages"][1]["content"])
+            self.assertIn('"assignments":{', payload["messages"][0]["content"])
+            return {"choices": [{"message": {"content": json.dumps(content)}}]}
+
+        config = type(
+            "Config",
+            (),
+            {"text": type("Text", (), {"model": "legacy-model", "backend_port": 11435})()},
+        )()
+        adapter = QwenTextAdapter(config, request=request)
+
+        result = adapter.analyze(
+            {
+                "bookId": "physical:" + "d4" * 32,
+                "chapterId": "chapter:" + "e5" * 32,
+                "textHash": "f6" * 32,
+                "analysisVersion": "1",
+                "characters": [],
+                "units": [
+                    {"unitId": long_ids[0], "text": "夜色落下。"},
+                    {"unitId": long_ids[1], "text": "回家吧。"},
+                ],
+                "previousContext": {"recentAssignments": []},
+            }
+        )
+
+        self.assertEqual(
+            [long_ids[1], long_ids[0]],
+            [item["unitId"] for item in result["assignments"]],
+        )
+        self.assertIn('"u1"', sent[0])
+        for unit_id in long_ids:
+            self.assertNotIn(unit_id, sent[0])
+
     def test_qwen_text_normalizes_response_and_strips_private_fields(self):
         config = type(
             "Config",

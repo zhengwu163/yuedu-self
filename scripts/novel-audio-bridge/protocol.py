@@ -10,7 +10,10 @@ try:
     from scripts.novel_audio_server.protocol import (
         analysis_request as _generic_analysis_request,
         analysis_response as _generic_analysis_response,
+        load_analysis_json,
+        model_analysis_request,
         parse_analysis_json as _generic_parse_analysis_json,
+        restore_model_unit_ids,
         strict_json_loads as _generic_strict_json_loads,
         synthesis_request as _generic_synthesis_request,
     )
@@ -19,7 +22,10 @@ except ModuleNotFoundError:
     from scripts.novel_audio_server.protocol import (
         analysis_request as _generic_analysis_request,
         analysis_response as _generic_analysis_response,
+        load_analysis_json,
+        model_analysis_request,
         parse_analysis_json as _generic_parse_analysis_json,
+        restore_model_unit_ids,
         strict_json_loads as _generic_strict_json_loads,
         synthesis_request as _generic_synthesis_request,
     )

@@ -113,7 +113,8 @@ class CloudWorker:
                                    data, timeout, scope=self._processes)
 
     def analyze(self, request):
-        return strict_json_loads(self._call("analyze", request, 40))
+        # 略长于云端 85 秒分析预算，短于 Android 100 秒读超时，手机才能收到固定错误码。
+        return strict_json_loads(self._call("analyze", request, 90))
 
     def synthesize(self, request):
         return self._call("synthesize", request, 25)

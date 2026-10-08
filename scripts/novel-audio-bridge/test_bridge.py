@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from protocol import BridgeError
+from protocol import BridgeError, CloudTimeoutError
 from bridge import (
     BridgeApi,
     BridgeConfig,
@@ -279,6 +279,36 @@ class BridgeApiTest(unittest.TestCase):
         self.assertEqual(["u1", "u2"], [item["unitId"] for item in body["assignments"]])
         self.assertNotIn("text", body)
         self.assertEqual(1, len(self.cloud.analysis_requests))
+
+    def test_generation_failure_logs_only_fixed_diagnostics(self):
+        records = []
+        self.api.log = records.append
+
+        def timeout(_):
+            raise CloudTimeoutError()
+
+        self.cloud.analyze = timeout
+        unit_id = "u_" + "a1" * 32
+        code, _, body = self.call(
+            "/v1/chapter/analyze",
+            {
+                "bookId": "book",
+                "chapterId": "chapter",
+                "textHash": "hash",
+                "analysisVersion": "1",
+                "characters": [],
+                "units": [{"unitId": unit_id, "text": "林舟说回家"}],
+                "previousContext": {"recentAssignments": []},
+            },
+        )
+
+        self.assertEqual((504, "cloud_timeout"), (code, body["error"]["code"]))
+        self.assertEqual(1, len(records))
+        line = records[0]
+        for expected in ("chapter/analyze", "504", "cloud_timeout", "units=1", "utf16=5"):
+            self.assertIn(expected, line)
+        for secret in (unit_id, "林舟", "bridge-token", "cloud-key"):
+            self.assertNotIn(secret, line)
 
     def test_analyze_rejects_assignment_outside_request(self):
         self.cloud.analysis_response = {

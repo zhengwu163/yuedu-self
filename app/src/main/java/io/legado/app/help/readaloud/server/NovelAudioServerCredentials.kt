@@ -9,7 +9,7 @@ internal class NovelAudioServerCredentials private constructor(val baseUrl: Stri
     fun newClient(): NovelAudioServerClient = NovelAudioServerClient(
         baseUrl = baseUrl,
         tokenProvider = { token },
-        timeoutLimitMillis = 45_000,
+        timeoutLimitMillis = NovelAudioServerClient.MAX_TIMEOUT_MILLIS,
         budgetLedger = null
     )
 
@@ -17,7 +17,7 @@ internal class NovelAudioServerCredentials private constructor(val baseUrl: Stri
         NovelAudioServerClient(
             baseUrl = baseUrl,
             tokenProvider = { token },
-            timeoutLimitMillis = 45_000,
+            timeoutLimitMillis = NovelAudioServerClient.MAX_TIMEOUT_MILLIS,
             budgetLedger = budgetLedger
         )
 

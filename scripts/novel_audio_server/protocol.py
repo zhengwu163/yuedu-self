@@ -87,12 +87,17 @@ def strict_json_loads(value):
         raise ValueError("invalid") from None
 
 
-def parse_analysis_json(value):
+def load_analysis_json(value):
+    """Strictly load a model's analysis JSON object, tolerating a json fence."""
     string(value, MAX_JSON)
     text = value.strip()
     if text.startswith("```json\n") and text.endswith("```"):
         text = text[8:-3].strip()
-    result = record(strict_json_loads(text))
+    return record(strict_json_loads(text))
+
+
+def parse_analysis_json(value):
+    result = load_analysis_json(value)
     for key in ("assignments", "newCharacters", "aliasUpdates"):
         array(result.get(key))
     return result
@@ -152,6 +157,57 @@ def analysis_request(body):
     )
     require(len(json.dumps(result, ensure_ascii=False).encode()) <= 32 * 1024)
     return result
+
+
+def model_analysis_request(request):
+    """Build the model-facing view of a validated analysis request.
+
+    Android unit IDs are opaque 66-character hashes. Asking a model to echo
+    dozens of them multiplies output tokens and invites copy errors, so the
+    model only sees short ordinal aliases. Book/chapter/text hashes carry no
+    meaning for attribution and are omitted. Returns (view, alias -> unitId).
+    """
+    aliases = {}
+    units = []
+    for index, unit in enumerate(request["units"], 1):
+        alias = f"u{index}"
+        aliases[alias] = unit["unitId"]
+        units.append({"unitId": alias, "text": unit["text"]})
+    recent = [
+        {"unitId": f"p{index}", "speakerId": item["speakerId"]}
+        for index, item in enumerate(
+            request["previousContext"]["recentAssignments"], 1
+        )
+    ]
+    view = {
+        "characters": request["characters"],
+        "units": units,
+        "previousContext": {"recentAssignments": recent},
+    }
+    return view, aliases
+
+
+def restore_model_unit_ids(value, aliases):
+    """Map model aliases back to request unit IDs before strict validation.
+
+    Models answer with a compact {"u1": "narrator"} mapping (about half the
+    output tokens of the list form); the list form is still accepted. Unknown
+    aliases are left untouched so analysis_response still rejects them.
+    """
+    record(value)
+    assignments = value.get("assignments")
+    if isinstance(assignments, dict):
+        assignments = [
+            {"unitId": unit_id, "speakerId": speaker_id}
+            for unit_id, speaker_id in assignments.items()
+        ]
+    restored = []
+    for item in array(assignments):
+        if isinstance(item, dict) and isinstance(item.get("unitId"), str) \
+                and item["unitId"] in aliases:
+            item = dict(item, unitId=aliases[item["unitId"]])
+        restored.append(item)
+    return dict(value, assignments=restored)
 
 
 def analysis_response(value, request):
