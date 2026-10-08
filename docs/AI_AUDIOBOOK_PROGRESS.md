@@ -76,6 +76,10 @@ PINNED 入口点击链路、杀进程后续播、启动续传、普通系统 TTS
 
 ## 代码同步与本地服务器联调交接（2026-10-01）
 
+> 2026-10-08 更新：联调基准改为 GitHub [`zhengwu163/yuedu-self`](https://github.com/zhengwu163/yuedu-self)
+> 的 `feat/local-model-service` 分支（含阶段 7B 本地模型服务、Runtime Lease 与整章分析超时修复）。
+> Windows 侧直接从该分支获取代码，不再传递 ZIP 源码包；下文 `feat/ai-audiobook` 仅为历史基准。
+
 ### 用哪个分支
 
 - `feat/ai-audiobook` 包含全部代码，是联调基准。本地 `main`（与 iCode `origin/main` 一致）
