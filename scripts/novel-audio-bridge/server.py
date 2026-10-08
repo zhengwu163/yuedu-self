@@ -6,13 +6,10 @@ import io
 import json
 import os
 import shutil
-import socket
 import subprocess
-import threading
 import time
 import wave
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from bridge import BridgeApi
@@ -21,123 +18,19 @@ from local_state import BridgeConfig, UsageGuard
 from protocol import BridgeError, MAX_JSON, TTS_MODEL, VoiceCatalog, strict_json_loads
 from worker import CloudWorker
 
+try:
+    from scripts.novel_audio_server.http import create_server as _create_shared_server
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.novel_audio_server.http import create_server as _create_shared_server
+
 ROOT = Path(__file__).resolve().parents[2]
 TEMPLATE = "# 仅填写北京地域百炼通用 API Key，保存后执行检查。\nDASHSCOPE_API_KEY=\n"
 
 
 def create_server(host, port, api):
-    if host != "127.0.0.1":
-        raise ValueError("loopback only")
-
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *_):
-            pass
-
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(5)
-            # 限制慢速 header/body 占用；云操作开始前取消该计时器。
-            def close_input():
-                try:
-                    self.connection.shutdown(socket.SHUT_RDWR)
-                except OSError:
-                    pass
-            self.input_timer = threading.Timer(10, close_input)
-            self.input_timer.daemon = True
-            self.input_timer.start()
-
-        def finish(self):
-            self.input_timer.cancel()
-            try:
-                super().finish()
-            except OSError:
-                pass
-
-        def do_GET(self):
-            self.handle_api()
-
-        def do_POST(self):
-            self.handle_api()
-
-        def handle_api(self):
-            try:
-                result = self.prepare()
-                self.input_timer.cancel()
-                code, headers, body = result
-                data = body if isinstance(body, bytes) else json.dumps(
-                    body, ensure_ascii=False, allow_nan=False).encode()
-                self.send_response(code)
-                for key, value in headers.items():
-                    self.send_header(key, value)
-                self.send_header("Content-Length", str(len(data)))
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Connection", "close")
-                self.end_headers()
-                self.wfile.write(data)
-            except OSError:
-                pass  # 客户端已断开；不会重新请求云服务。
-
-        def prepare(self):
-            auths = self.headers.get_all("Authorization", [])
-            if len(auths) != 1 or not api.authorized(auths[0]):
-                return api.error(401, "unauthorized")
-            sizes = self.headers.get_all("Content-Length", [])
-            if self.headers.get("Transfer-Encoding") or len(sizes) > 1:
-                return api.error(400, "invalid_framing")
-            if sizes and (not sizes[0].isascii() or not sizes[0].isdecimal() or len(sizes[0]) > 10):
-                return api.error(400, "invalid_framing")
-            size = int(sizes[0]) if sizes else 0
-            if size > MAX_JSON:
-                return api.error(413, "too_large")
-            if self.command == "POST" and self.headers.get_content_type() != "application/json":
-                return api.error(400, "invalid_content_type")
-            try:
-                raw, deadline = bytearray(), time.monotonic() + 5
-                while len(raw) < size:
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        return api.error(408, "request_timeout")
-                    self.connection.settimeout(remaining)
-                    chunk = self.rfile.read1(min(65536, size - len(raw)))
-                    if not chunk:
-                        return api.error(400, "incomplete_body")
-                    raw.extend(chunk)
-                body = strict_json_loads(bytes(raw)) if raw else None
-            except (ValueError, TimeoutError):
-                return api.error(400, "invalid_json")
-            self.input_timer.cancel()
-            return api.respond(self.command, self.path, auths[0], body)
-
-    class Server(ThreadingHTTPServer):
-        # 最多 8 个 HTTP 连接、1 个生成请求；无本地排队消耗额度。
-        slots = threading.BoundedSemaphore(8)
-        daemon_threads = True
-
-        def server_close(self):
-            # Ctrl+C 会离开 with 服务块；显式清理 worker，不能依赖 daemon 线程收尾。
-            api.close()
-            super().server_close()
-
-        def process_request(self, request, address):
-            if not self.slots.acquire(blocking=False):
-                self.shutdown_request(request)
-                return
-            try:
-                super().process_request(request, address)
-            except Exception:
-                self.slots.release()
-                raise
-
-        def process_request_thread(self, request, address):
-            try:
-                super().process_request_thread(request, address)
-            finally:
-                self.slots.release()
-
-        def handle_error(self, *_):
-            pass  # 默认 traceback 可能含敏感参数，禁用原始异常输出。
-
-    return Server((host, port), Handler)
+    return _create_shared_server(host, port, api)
 
 
 def media_profile(config):

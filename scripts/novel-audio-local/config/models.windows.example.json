@@ -1,0 +1,80 @@
+{
+  "version": "1",
+  "models": [
+    {
+      "assetId": "qwen35-4b-q4km",
+      "type": "text",
+      "family": "qwen3.5",
+      "format": "gguf",
+      "path": "../models/qwen3.5-4b-q4_k_m/model.gguf",
+      "sha256": "",
+      "requiredVramGb": 24,
+      "capabilities": ["chapter-analysis", "zh-CN"],
+      "adapter": "llama.cpp-openai-compatible",
+      "source": "用户按 README 指引从官方模型页面下载",
+      "license": "见 licenses/ 中对应模型许可",
+      "enabled": true
+    },
+    {
+      "assetId": "qwen35-9b-q4km",
+      "type": "text",
+      "family": "qwen3.5",
+      "format": "gguf",
+      "path": "../models/qwen3.5-9b-q4_k_m/model.gguf",
+      "sha256": "",
+      "requiredVramGb": 24,
+      "capabilities": ["chapter-analysis", "zh-CN"],
+      "adapter": "llama.cpp-openai-compatible",
+      "source": "用户按 README 指引从官方模型页面下载",
+      "license": "见 licenses/ 中对应模型许可",
+      "enabled": true
+    },
+    {
+      "assetId": "qwen3-tts-base",
+      "type": "tts",
+      "family": "qwen3-tts",
+      "format": "directory",
+      "path": "../models/qwen3-tts-base",
+      "sha256": "",
+      "requiredVramGb": 24,
+      "capabilities": ["speech-synthesis", "voice-clone", "zh-CN"],
+      "adapter": "qwen3-tts-native",
+      "source": "用户按 README 指引从官方模型页面下载",
+      "license": "见 licenses/ 中对应模型许可",
+      "enabled": true
+    },
+    {
+      "assetId": "qwen3-tts-voicedesign",
+      "type": "tts",
+      "family": "qwen3-tts",
+      "format": "directory",
+      "path": "../models/qwen3-tts-voicedesign",
+      "sha256": "",
+      "requiredVramGb": 24,
+      "capabilities": ["speech-synthesis", "voice-design", "zh-CN"],
+      "adapter": "qwen3-tts-native",
+      "source": "用户按 README 指引从官方模型页面下载",
+      "license": "见 licenses/ 中对应模型许可",
+      "enabled": true
+    }
+  ],
+  "profiles": [
+    {
+      "profileId": "qwen35-9b-voicedesign",
+      "textModel": "qwen35-9b-q4km",
+      "ttsModel": "qwen3-tts-voicedesign",
+      "minVramGb": 24,
+      "maxConcurrency": 1,
+      "capabilities": ["chapter-analysis", "speech-synthesis", "voice-design", "zh-CN"]
+    },
+    {
+      "profileId": "qwen35-4b-base",
+      "textModel": "qwen35-4b-q4km",
+      "ttsModel": "qwen3-tts-base",
+      "minVramGb": 24,
+      "maxConcurrency": 1,
+      "capabilities": ["chapter-analysis", "speech-synthesis", "voice-clone", "zh-CN"]
+    }
+  ],
+  "activeProfile": "qwen35-9b-voicedesign"
+}

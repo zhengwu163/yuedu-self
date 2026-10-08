@@ -1,0 +1,30 @@
+{
+  "host": "127.0.0.1",
+  "port": 8787,
+  "allowLan": false,
+  "tokenFile": "state/agent-token",
+  "leaseTtl": 900,
+  "workerStartupTimeout": 600,
+  "workerIpcTimeout": 540,
+  "modelRegistry": "config/models.windows.example.json",
+  "activeProfile": "qwen35-9b-voicedesign",
+  "minimumVramGb": 24,
+  "text": {
+    "model": "qwen3.5-9b-q4_k_m",
+    "modelPath": "models/qwen3.5-9b-q4_k_m/model.gguf",
+    "runner": "runtime/llama-server.exe",
+    "contextLength": 8192,
+    "gpuLayers": 999,
+    "backendPort": 11435,
+    "startTimeout": 180
+  },
+  "tts": {
+    "runtime": "runtime/tts-python",
+    "pythonExecutable": "runtime/tts-python/python.exe",
+    "voiceDesignModel": "models/qwen3-tts-voicedesign",
+    "baseModel": "models/qwen3-tts-base",
+    "ffmpeg": "runtime/ffmpeg/bin/ffmpeg.exe",
+    "ffprobe": "runtime/ffmpeg/bin/ffprobe.exe"
+  },
+  "voiceCatalog": "voices/standard.json"
+}

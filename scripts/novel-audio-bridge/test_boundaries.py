@@ -5,11 +5,13 @@ import io
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
+import local_state
 from bridge import (
     BailianClient, BridgeApi, BridgeConfig, CloudQuotaError, CloudProtocolError,
     LocalQuotaError, UsageGuard, _strict_json_loads, parse_tts_audio_url,
@@ -163,14 +165,75 @@ class BoundaryTest(unittest.TestCase):
     def test_quota_reservation_atomic_across_instances(self):
         limits = {"analysis_requests": 3, "analysis_characters": 50,
                   "tts_requests": 3, "tts_characters": 50}
+        count_path = self.path / "count.db"
+        # Keep first-use initialization out of this reservation-only contention test.
+        UsageGuard(count_path, limits).token()
+
         def attempt(_):
             try:
-                UsageGuard(self.path / "count.db", limits).reserve("analysis", 1)
+                UsageGuard(count_path, limits).reserve("analysis", 1)
                 return 1
             except LocalQuotaError:
                 return 0
         with ThreadPoolExecutor(max_workers=8) as pool:
             self.assertEqual(3, sum(pool.map(attempt, range(30))))
+
+    def test_first_use_reader_fails_closed_without_consuming_quota(self):
+        limits = {"analysis_requests": 3, "analysis_characters": 50,
+                  "tts_requests": 3, "tts_characters": 50}
+        state_path = self.path / "first-use.db"
+        creator_created_file = threading.Event()
+        reader_connected = threading.Event()
+        release_creator = threading.Event()
+        creator_result = []
+        reader_result = []
+        real_close = local_state.os.close
+        real_connect = local_state.sqlite3.connect
+
+        def hold_creator_after_file_create(fd):
+            real_close(fd)
+            if not creator_created_file.is_set():
+                creator_created_file.set()
+                # Hold the creator after O_EXCL, before it can create SQLite schema.
+                release_creator.wait(timeout=2)
+
+        def observe_reader_connect(*args, **kwargs):
+            if creator_created_file.is_set() and not release_creator.is_set():
+                reader_connected.set()
+            return real_connect(*args, **kwargs)
+
+        def reserve(result):
+            try:
+                UsageGuard(state_path, limits).reserve("analysis", 1)
+                result.append("reserved")
+            except LocalQuotaError:
+                result.append("local_quota_error")
+            except Exception as error:
+                result.append(type(error).__name__)
+
+        with patch.object(local_state.os, "close", hold_creator_after_file_create), \
+                patch.object(local_state.sqlite3, "connect", observe_reader_connect):
+            creator = threading.Thread(target=reserve, args=(creator_result,))
+            creator.start()
+            self.assertTrue(creator_created_file.wait(1))
+
+            reader = threading.Thread(target=reserve, args=(reader_result,))
+            reader.start()
+            self.assertTrue(reader_connected.wait(1))
+            reader.join(1)
+            self.assertFalse(reader.is_alive())
+
+            release_creator.set()
+            creator.join(1)
+            self.assertFalse(creator.is_alive())
+
+        self.assertEqual(["local_quota_error"], reader_result)
+        self.assertEqual(["reserved"], creator_result)
+        with contextlib.closing(sqlite3.connect(state_path)) as db, db:
+            row = db.execute(
+                "SELECT analysis_requests, analysis_characters FROM budget WHERE id=1"
+            ).fetchone()
+        self.assertEqual((1, 1), row)
 
     def test_nonfinite_duplicate_surrogate_json_rejected(self):
         for raw in ('{"a":{"x":1,"x":2}}', '{"x":NaN}', '{"x":Infinity}', '{"x":"\\ud800"}'):

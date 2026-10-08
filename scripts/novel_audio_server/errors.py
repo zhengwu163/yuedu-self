@@ -17,6 +17,22 @@ class InvalidBackendResponseError(NovelAudioError):
     status, code = 502, "invalid_backend_response"
 
 
+class BackendError(NovelAudioError):
+    status, code = 503, "backend_unavailable"
+
+
+class RunnerUnavailableError(BackendError):
+    code = "runner_unavailable"
+
+
+class RunnerIncompatibleError(BackendError):
+    code = "runner_incompatible"
+
+
+class MissingReferenceAudioError(BackendError):
+    code = "missing_reference_audio"
+
+
 class ServiceBusyError(NovelAudioError):
     status, code = 429, "busy"
 
@@ -35,3 +51,11 @@ class WorkerStartError(NovelAudioError):
 
 class WorkerStopError(NovelAudioError):
     status, code = 503, "worker_stop_failed"
+
+
+class RequestCancelledError(NovelAudioError):
+    status, code = 503, "request_cancelled"
+
+
+class WorkerUnavailableError(NovelAudioError, RuntimeError):
+    status, code = 503, "worker_unavailable"

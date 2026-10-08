@@ -1,0 +1,42 @@
+{
+  "version": "2026-10-08",
+  "voices": [
+    {
+      "voiceAssetId": "local.qwen3-tts.narrator",
+      "displayName": "旁白·清晰",
+      "gender": "unknown",
+      "ageRange": "adult",
+      "traits": ["清晰", "自然"],
+      "kind": "voicedesign",
+      "prompt": "成年中文旁白，清晰自然，语速稳定，适合长篇小说叙述。",
+      "narrator": true
+    },
+    {
+      "voiceAssetId": "local.qwen3-tts.young-male",
+      "displayName": "青年男声",
+      "gender": "male",
+      "ageRange": "young_adult",
+      "traits": ["清朗", "自然"],
+      "kind": "voicedesign",
+      "prompt": "年轻成年男性，清朗自然，情绪克制，普通话清晰。"
+    },
+    {
+      "voiceAssetId": "local.qwen3-tts.young-female",
+      "displayName": "青年女声",
+      "gender": "female",
+      "ageRange": "young_adult",
+      "traits": ["温柔", "自然"],
+      "kind": "voicedesign",
+      "prompt": "年轻成年女性，温柔自然，吐字清晰，适合小说对白。"
+    },
+    {
+      "voiceAssetId": "local.qwen3-tts.base-reference",
+      "displayName": "Base·参考声线",
+      "gender": "unknown",
+      "ageRange": "adult",
+      "traits": [],
+      "kind": "base",
+      "referenceAudio": "state/reference-audio/reference.wav"
+    }
+  ]
+}

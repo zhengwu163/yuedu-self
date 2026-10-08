@@ -252,6 +252,7 @@ git_log.txt
 !/docs/superpowers/plans/
 /ai_tests/*
 !/ai_tests/
+!/ai_tests/test_audit_gson_generic_signature.py
 !/ai_tests/config/
 /ai_tests/config/*
 !/ai_tests/config/gate_registry.json
@@ -289,3 +290,4 @@ git_log.txt
 /novel-audio.local.state.db*
 /novel-audio.local.connection.json*
 /novel-audio.local.smoke/
+/scripts/novel-audio-local/state/

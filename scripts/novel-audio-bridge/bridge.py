@@ -33,11 +33,13 @@ class BridgeApi:
         return hmac.compare_digest((authorization or "").encode("utf-8"),
                                    ("Bearer " + self.config.bridge_token).encode("utf-8"))
 
-    def respond(self, method, path, authorization, body):
+    def respond(self, method, path, authorization, body, lease_id=None):
         if not self.authorized(authorization):
             return self.error(401, "unauthorized")
         if self._closed:
             return self.error(503, "stopped")
+        if lease_id:
+            return self.error(409, "invalid_lease")
         headers = {"Content-Type": "application/json"}
         if method == "GET" and path == "/v1/health":
             ready = self.config.cloud_ready() and not self._quota_blocked
