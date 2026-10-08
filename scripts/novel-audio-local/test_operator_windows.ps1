@@ -15,6 +15,9 @@ $script:skipped = 0
 $script:fixture = Join-Path ([System.IO.Path]::GetTempPath()) `
     ("novel-audio-operator-" + [guid]::NewGuid().ToString("N"))
 $configPath = Join-Path $script:fixture "local-model.json"
+# Get-ConfiguredPython requires the interpreter to exist, so the fixture owns a
+# placeholder instead of assuming a host-wide Python install path.
+$fakePython = Join-Path $script:fixture "python.exe"
 
 function Assert-OperatorTest {
     param(
@@ -44,17 +47,21 @@ function Invoke-Case {
 
 try {
     New-Item -ItemType Directory -Path $script:fixture -Force | Out-Null
-    Set-Content -LiteralPath $configPath `
-        -Value '{"tts":{"pythonExecutable":"C:\\Python\\python.exe"}}' `
-        -Encoding ASCII
+    Set-Content -LiteralPath $fakePython -Value "" -Encoding ASCII
+    # The temp path may contain non-ASCII user names; write UTF-8 without BOM.
+    $fixtureConfig = @{ tts = @{ pythonExecutable = $fakePython } } |
+        ConvertTo-Json -Compress
+    [System.IO.File]::WriteAllText(
+        $configPath, $fixtureConfig, (New-Object System.Text.UTF8Encoding($false))
+    )
     $context = Get-OperatorContext -ConfigPath $configPath
     Ensure-OperatorDirectory $context.State
 
     Invoke-Case "exact process command rejects server.py.bak" {
         $bad = [pscustomobject]@{
-            ExecutablePath = 'C:\Python\python.exe'
-            CommandLine = ('"C:\Python\python.exe" "{0}.bak" --serve --config "{1}"' -f
-                $context.ScriptPath, $context.ConfigPath)
+            ExecutablePath = $fakePython
+            CommandLine = ('"{0}" "{1}.bak" --serve --config "{2}"' -f
+                $fakePython, $context.ScriptPath, $context.ConfigPath)
         }
         Assert-OperatorTest `
             (-not (Test-AgentCommand -Process $bad -Context $context)) `
@@ -63,9 +70,9 @@ try {
 
     Invoke-Case "exact process command accepts script serve config tuple" {
         $good = [pscustomobject]@{
-            ExecutablePath = 'C:\Python\python.exe'
-            CommandLine = ('"C:\Python\python.exe" "{0}" --serve --config "{1}"' -f
-                $context.ScriptPath, $context.ConfigPath)
+            ExecutablePath = $fakePython
+            CommandLine = ('"{0}" "{1}" --serve --config "{2}"' -f
+                $fakePython, $context.ScriptPath, $context.ConfigPath)
         }
         Assert-OperatorTest `
             (Test-AgentCommand -Process $good -Context $context) `

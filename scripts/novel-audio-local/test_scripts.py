@@ -209,14 +209,14 @@ class PowerShellContractTest(unittest.TestCase):
 
     def test_windows_lifecycle_fixture_matches_exact_command_contract(self):
         text = self.source("test_operator_windows.ps1")
-        self.assertIn(
-            '"pythonExecutable":"C:\\\\Python\\\\python.exe"',
-            text,
-        )
-        self.assertIn(
-            "ExecutablePath = 'C:\\Python\\python.exe'",
-            text,
-        )
+        # Get-ConfiguredPython rejects a missing interpreter, so the fixture
+        # must create its own and use it for config, image path, and argv[0].
+        self.assertNotIn("C:\\Python\\python.exe", text)
+        self.assertIn('$fakePython = Join-Path $script:fixture "python.exe"', text)
+        self.assertIn("Set-Content -LiteralPath $fakePython", text)
+        self.assertIn("pythonExecutable = $fakePython", text)
+        self.assertEqual(text.count("ExecutablePath = $fakePython"), 2)
+        self.assertEqual(text.count("$fakePython, $context.ScriptPath, $context.ConfigPath"), 2)
 
 
 if __name__ == "__main__":
