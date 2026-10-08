@@ -21,32 +21,46 @@ class UsageGuard:
         self.limits = dict(LIMITS if limits is None else limits)
         self._blocked = False
 
+    def _initialize(self):
+        """在同目录临时文件内建表，再用硬链接原子发布。
+
+        直接在正式路径创建空文件再建表时，并发首用的其他实例会在建表前读到空库，
+        并按损坏处理而拒绝预占；发布后的正式文件始终已完成初始化。
+        """
+        temp = self.path.with_name(f"{self.path.name}.init-{secrets.token_hex(8)}")
+        os.close(os.open(temp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        try:
+            with closing(sqlite3.connect(temp)) as db:
+                db.execute("PRAGMA synchronous=FULL")
+                with db:
+                    db.execute("BEGIN IMMEDIATE")
+                    db.execute("""CREATE TABLE budget (
+                        id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL,
+                        token TEXT NOT NULL, blocked INTEGER NOT NULL,
+                        analysis_requests INTEGER NOT NULL, analysis_characters INTEGER NOT NULL,
+                        tts_requests INTEGER NOT NULL, tts_characters INTEGER NOT NULL)""")
+                    db.execute("INSERT INTO budget VALUES(1,1,?,0,0,0,0,0)",
+                               (secrets.token_urlsafe(32),))
+            try:
+                os.link(temp, self.path)
+            except FileExistsError:
+                pass  # 其他实例已先发布，沿用其累计计数。
+        finally:
+            os.unlink(temp)
+
     @contextmanager
     def _transaction(self):
         try:
             require(not self.path.is_symlink())
             # 父目录必须已存在；使用者提供项目根路径，不能静默创建任意目录。
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                created = False
-            else:
-                os.close(fd)
-                created = True
+            if not self.path.exists():
+                self._initialize()
             with closing(sqlite3.connect(self.path, timeout=2)) as db:
                 db.execute("PRAGMA synchronous=FULL")
                 with db:
                     db.execute("BEGIN IMMEDIATE")
-                    # 只有本次 O_EXCL 创建的文件允许初始化。既有空文件/缺表/缺行
-                    # 属于损坏，不能以“自动修复”把累计计数与熔断恢复成零。
-                    if created:
-                        db.execute("""CREATE TABLE budget (
-                            id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL,
-                            token TEXT NOT NULL, blocked INTEGER NOT NULL,
-                            analysis_requests INTEGER NOT NULL, analysis_characters INTEGER NOT NULL,
-                            tts_requests INTEGER NOT NULL, tts_characters INTEGER NOT NULL)""")
-                        db.execute("INSERT INTO budget VALUES(1,1,?,0,0,0,0,0)",
-                                   (secrets.token_urlsafe(32),))
+                    # 正式路径只会出现已初始化的库。既有空文件/缺表/缺行属于损坏，
+                    # 不能以“自动修复”把累计计数与熔断恢复成零。
                     row = db.execute("SELECT * FROM budget WHERE id=1").fetchone()
                     require(row and row[1] == 1 and row[3] in (0, 1)
                             and isinstance(row[2], str) and len(row[2]) >= 32

@@ -172,6 +172,27 @@ class BoundaryTest(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=8) as pool:
             self.assertEqual(3, sum(pool.map(attempt, range(30))))
 
+    def test_first_use_never_exposes_uninitialized_budget(self):
+        # 在首个实例初始化预算库的窗口内插入第二个实例，复现并发首用时
+        # 另一实例看到空库并误判为损坏的竞态。
+        path = self.path / "first-use.db"
+        connect = sqlite3.connect
+        interleaved = []
+
+        def interleave(*args, **kwargs):
+            if not interleaved:
+                interleaved.append(True)
+                UsageGuard(path).reserve("tts", 1)
+            return connect(*args, **kwargs)
+
+        with patch("local_state.sqlite3.connect", side_effect=interleave):
+            UsageGuard(path).reserve("tts", 2)
+        with contextlib.closing(sqlite3.connect(path)) as db:
+            self.assertEqual((2, 3), db.execute(
+                "SELECT tts_requests, tts_characters FROM budget").fetchone())
+        self.assertEqual(["first-use.db"], sorted(p.name for p in self.path.iterdir()
+                                                  if p.name.startswith("first-use")))
+
     def test_nonfinite_duplicate_surrogate_json_rejected(self):
         for raw in ('{"a":{"x":1,"x":2}}', '{"x":NaN}', '{"x":Infinity}', '{"x":"\\ud800"}'):
             with self.assertRaises(ValueError):
