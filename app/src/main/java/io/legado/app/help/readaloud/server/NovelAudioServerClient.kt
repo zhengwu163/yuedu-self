@@ -87,7 +87,7 @@ class NovelAudioServerClient(
         try {
             NovelAudioJson.analysis(json("chapter/analyze", body, 45_000), request)
         } finally {
-            reservation?.close()
+            reservation.close()
         }
     }
 
@@ -121,23 +121,27 @@ class NovelAudioServerClient(
                 val result = exchange(path, body, 30_000, true)
                 SynthesizedAudio(result.bytes, result.type, result.profile)
             } finally {
-                reservation?.close()
+                reservation.close()
             }
         }
 
     /**
-     * 计费操作在真实请求前预占本地额度；服务端明确声明不计费的操作（如本地模型合成）跳过账本。
-     * 探测失败或未开启探测时一律按计费处理，保持 fail closed。
+     * 计费操作在真实请求前预占本地额度；服务端明确声明不计费的操作（如本地模型合成）
+     * 只占用单飞许可、不扣额度。探测失败或未开启探测时一律按计费处理，保持 fail closed。
      */
     private suspend fun reserveIfMetered(
         operation: String,
         kind: NovelAudioBudgetLedger.Kind,
         utf16Characters: Int,
         vendorRequests: Int = 1
-    ): NovelAudioBudgetLedger.Reservation? {
-        if (!isMetered(operation)) return null
+    ): NovelAudioBudgetLedger.Reservation {
+        val metered = isMetered(operation)
         val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
-        return ledger.reserve(kind, utf16Characters, vendorRequests)
+        return if (metered) {
+            ledger.reserve(kind, utf16Characters, vendorRequests)
+        } else {
+            ledger.acquireSlot()
+        }
     }
 
     private suspend fun isMetered(operation: String): Boolean {

@@ -165,6 +165,17 @@ class NovelAudioBudgetLedger(
         }
     }
 
+    /**
+     * 只占用单飞生成许可，不扣额度、不读写账本；用于服务端声明不计费的操作。
+     * 拿不到许可立即拒绝，与 [reserve] 共用同一许可，防止计费与不计费请求并发。
+     */
+    fun acquireSlot(): Reservation {
+        if (!activeLock.tryAcquire()) {
+            throw budgetError("CONCURRENCY_LIMIT")
+        }
+        return Reservation { activeLock.release() }
+    }
+
     /** 云端确认免费额度耗尽后持久熔断，后续计费端点立即拒绝。 */
     fun blockCloudQuota() {
         synchronized(fileLock) {

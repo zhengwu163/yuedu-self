@@ -123,6 +123,42 @@ class NovelAudioServerClientTest {
         assertTrue(requests.none { it.first.endsWith("/v1/chapter/analyze") })
     }
 
+    @Test fun `unmetered generation still shares the single generation slot`() = runBlocking {
+        // 不计费只免扣额度，不免单飞：本地服务同一时间只接一个生成请求。
+        val ledger = testLedger()
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        healthPayload = """{"status":"ok","apiVersion":"1","directorReady":true,"ttsReady":true,""" +
+            """"meteredOperations":["analysis"]}"""
+        beforeResponse = {
+            if (requests.last().first.endsWith("/v1/tts/synthesize")) {
+                started.countDown()
+                check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        }
+        mime = "audio/ogg"
+        profile = "local-v1"
+        payload = "OggS-test-fixture"
+        fun probing() = NovelAudioServerClient(
+            "http://127.0.0.1:${server.listeningPort}/prefix",
+            { "test-secret" },
+            budgetLedger = ledger,
+            probeMetering = true
+        )
+        val first = async { probing().synthesize(SynthesisRequest("原文", "M017")) }
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            expectError("CONCURRENCY_LIMIT") { probing().synthesize(SynthesisRequest("原文", "M017")) }
+            assertEquals(1, requests.count { it.first.endsWith("/v1/tts/synthesize") })
+        } finally {
+            release.countDown()
+        }
+        first.await()
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+    }
+
     @Test fun `failed metering probe keeps the local trial budget enforced`() = runBlocking {
         val ledger = testLedger()
         ledger.blockLocalBudget()

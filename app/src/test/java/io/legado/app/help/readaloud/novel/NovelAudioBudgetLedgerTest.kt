@@ -23,6 +23,25 @@ class NovelAudioBudgetLedgerTest {
     private var caseNumber = 0
 
     @Test
+    fun generationSlotIsExclusiveAndNeverCharges() {
+        // 不计费的生成仍须单飞，但不扣额度、也不受额度熔断影响。
+        val ledger = NovelAudioBudgetLedger(newStateFile())
+        ledger.blockLocalBudget()
+        val slot = ledger.acquireSlot()
+        try {
+            ledger.acquireSlot()
+            fail("second slot must be rejected")
+        } catch (error: NovelAudioServerException) {
+            assertEquals("CONCURRENCY_LIMIT", error.kind)
+        } finally {
+            slot.close()
+        }
+        ledger.acquireSlot().close()
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+        assertEquals(0, ledger.snapshot().analysisRequests)
+    }
+
+    @Test
     fun reservationPersistsUtf16CharactersAndVendorRequestCounts() {
         val stateFile = newStateFile()
         val ledger = NovelAudioBudgetLedger(
