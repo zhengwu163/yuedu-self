@@ -8,6 +8,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import wave
@@ -60,6 +61,7 @@ def create_server(host, port, api):
             self.handle_api()
 
         def handle_api(self):
+            started, code, body = time.monotonic(), 500, None
             try:
                 result = self.prepare()
                 self.input_timer.cancel()
@@ -76,6 +78,12 @@ def create_server(host, port, api):
                 self.wfile.write(data)
             except OSError:
                 pass  # 客户端已断开；不会重新请求云服务。
+            finally:
+                # 只记录路由、状态与固定诊断码；请求正文、令牌和云端原始响应一律不落日志。
+                line = f"{self.command} {self.path.split('?', 1)[0]} {code} {int((time.monotonic() - started) * 1000)}ms"
+                if isinstance(body, dict) and isinstance(body.get("error"), dict):
+                    line += f" {body['error'].get('code', '')}"
+                print(line, file=sys.stderr, flush=True)
 
         def prepare(self):
             auths = self.headers.get_all("Authorization", [])

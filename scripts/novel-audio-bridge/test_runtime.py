@@ -19,7 +19,7 @@ import server
 import test_cloud
 import worker as worker_module
 from bridge import BridgeApi, BridgeConfig, UsageGuard
-from protocol import BridgeError, CloudTimeoutError
+from protocol import BridgeError, CloudProtocolError, CloudTimeoutError
 from test_cloud import Response, response, AUDIO_URL, wav_fixture
 from test_boundaries import analysis, synthesis
 from test_bridge import FakeCloud
@@ -68,9 +68,17 @@ class HttpTest(unittest.TestCase):
 
     def test_auth_precedes_json_and_no_body_log(self):
         with contextlib.redirect_stderr(io.StringIO()) as output:
-            self.assertEqual(401, self.request("/v1/chapter/analyze", token="wrong", raw=b"\xff")[0])
-        self.assertEqual("", output.getvalue())
+            self.assertEqual(401, self.request("/v1/chapter/analyze?k=v", token="wrong", raw=b"\xff")[0])
+        # 访问日志只含路由、状态与诊断码，不含查询串、令牌或正文。
+        self.assertRegex(output.getvalue(), r"^POST /v1/chapter/analyze 401 \d+ms unauthorized\n$")
         self.assertEqual([], self.cloud.analysis_requests)
+
+    def test_access_log_reports_cloud_failure_code(self):
+        with patch.object(self.cloud, "analyze", side_effect=CloudProtocolError()), \
+                contextlib.redirect_stderr(io.StringIO()) as output:
+            self.assertEqual(502, self.request("/v1/chapter/analyze", analysis())[0])
+        self.assertRegex(output.getvalue(), r"^POST /v1/chapter/analyze 502 \d+ms invalid_cloud_response\n$")
+        self.assertNotIn("local", output.getvalue())
 
     def test_rejects_malformed_json_and_utf8(self):
         for raw in (b"\xff", b'{"units":[],"units":[]}', b'{"speed":NaN}',
