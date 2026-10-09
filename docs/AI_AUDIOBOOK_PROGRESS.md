@@ -64,9 +64,15 @@ Director 实际健康探测和发现失败时的 registry fail-closed。
 
 Phase 1 剩余事项：
 
+- 2026-10-09 真机（24117RK2CC）已装本分支测试包 3.26.100823debug，经 USB 隧道
+  （`adb reverse tcp:8788`）连接适配层，App 内「测试连接」显示分析与语音均就绪。
+  点播放被手机端本地预算账本拦截，未发出任何网络请求：账本
+  `no_backup/novel-audio-budget.json` 为百炼试用期设计（分析 20 次/24000 字、
+  TTS 100 次/5000 字，换凭据不重置），当前分析已用 12 次/23316 字。该账本对所有
+  服务一视同仁，本地 VoiceStudio 合成也会在累计 5000 字后被拦，需决定处理方式。
 - 人物分析目前借用百炼临时桥接，需真实云额度；本地模型版 Director 待
   Windows 部署时替换。
-- Android 真机联调与 Windows RTX 5090D v2 部署尚未开始。
+- Android 完整播放验收与 Windows RTX 5090D v2 部署尚未完成。
 
 截至 2026-09-30，NovelAudioServer 的 Android 通信层已实现并通过本地契约测试；
 已包含六个 v1 接口、独立标准 TLS 客户端、鉴权、协议校验、有界超时/响应和取消。
