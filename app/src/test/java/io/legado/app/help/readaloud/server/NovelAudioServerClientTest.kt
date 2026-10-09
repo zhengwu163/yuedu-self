@@ -611,6 +611,12 @@ class NovelAudioServerClientTest {
         }
     }
 
+    @Test fun `synthesis waits at least the server generation budget`() {
+        // 真机实测：客户端 30 秒先放弃，而本地服务端单次生成预算为 40 秒，整章重试全部超时。
+        assertTrue(NovelAudioServerClient.SYNTHESIS_TIMEOUT_MILLIS >= 40_000L)
+        assertTrue(NovelAudioServerClient.SYNTHESIS_TIMEOUT_MILLIS <= 45_000L)
+    }
+
     @Test fun `total timeout includes dispatcher queue and never sends expired work`() = runBlocking {
         val started = java.util.concurrent.CountDownLatch(5)
         val release = java.util.concurrent.CountDownLatch(1)

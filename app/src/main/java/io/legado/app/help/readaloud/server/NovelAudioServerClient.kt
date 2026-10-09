@@ -118,7 +118,7 @@ class NovelAudioServerClient(
                 vendorRequests = (request.text.codePointCount(0, request.text.length) + 599) / 600
             )
             try {
-                val result = exchange(path, body, 30_000, true)
+                val result = exchange(path, body, SYNTHESIS_TIMEOUT_MILLIS, true)
                 SynthesizedAudio(result.bytes, result.type, result.profile)
             } finally {
                 reservation.close()
@@ -297,6 +297,11 @@ class NovelAudioServerClient(
     }
 
     companion object {
+        /**
+         * 合成等待上限与分析一致取协议允许的 45 秒：服务端单次生成预算为 40 秒，
+         * 客户端更早放弃会让服务端白做且整章重试全部超时（M2 本地合成约 1.7 倍实时）。
+         */
+        internal const val SYNTHESIS_TIMEOUT_MILLIS = 45_000L
         private const val JSON_LIMIT = 2 * 1024 * 1024
         private const val AUDIO_LIMIT = 16 * 1024 * 1024
         private const val ERROR_BODY_LIMIT = 4096L
