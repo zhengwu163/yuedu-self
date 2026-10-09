@@ -26,11 +26,12 @@ setlocal EnableDelayedExpansion
 :: ============================================================
 
 :: ---------- Config ----------
-set "JAVA_HOME=C:\Program Files\AdoptOpenJDK\jdk-17.0.0.20-hotspot"
-set "ANDROID_HOME=C:\Android\Sdk"
-set "PROJECT_DIR=F:\myself\github\WeAgentChat\temp\legado"
+:: Preserve the caller's native toolchain and locate this repository even with spaces.
+if not defined JAVA_HOME set "JAVA_HOME=C:\Program Files\AdoptOpenJDK\jdk-17.0.0.20-hotspot"
+if not defined ANDROID_HOME set "ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk"
+set "PROJECT_DIR=%~dp0"
 set "APK_OUTPUT_DIR=%PROJECT_DIR%\app\build\outputs\apk"
-set "GRADLE_USER_HOME=F:\gh"
+if not defined GRADLE_USER_HOME set "GRADLE_USER_HOME=%USERPROFILE%\.gradle"
 set "DEFAULT_APP_ID=io.legado.miss.app"
 :: ----------------------------
 

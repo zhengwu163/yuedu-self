@@ -1,0 +1,3 @@
+# cmd.exe requires DOS line endings for these scripts, including UTF-8 comments.
+*.bat text eol=crlf
+*.cmd text eol=crlf

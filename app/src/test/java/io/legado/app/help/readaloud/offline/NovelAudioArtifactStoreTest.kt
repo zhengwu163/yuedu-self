@@ -9,6 +9,7 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.Assume.assumeNoException
 
 class NovelAudioArtifactStoreTest {
 
@@ -182,10 +183,16 @@ class NovelAudioArtifactStoreTest {
             val scope = root.resolve(NovelAudioPathCodec.scopeDirectory(SCOPE))
             try {
                 Files.createSymbolicLink(scope.toPath(), outside.toPath())
-            } catch (_: UnsupportedOperationException) {
-                return
-            } catch (_: SecurityException) {
-                return
+            } catch (error: UnsupportedOperationException) {
+                assumeNoException("Host does not support symlinks", error)
+            } catch (error: SecurityException) {
+                assumeNoException("Host denies symlink creation", error)
+            } catch (error: java.nio.file.FileSystemException) {
+                val reason = error.reason.orEmpty()
+                if (!System.getProperty("os.name").startsWith("Windows") ||
+                    !(reason.contains("privilege", ignoreCase = true) || reason.contains("特权"))
+                ) throw error
+                assumeNoException("Windows symlink privilege unavailable", error)
             }
             val store = NovelAudioArtifactStore(root) { true }
             assertThrows(NovelAudioArtifactStore.ArtifactStoreException::class.java) {

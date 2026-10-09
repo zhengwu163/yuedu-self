@@ -62,4 +62,17 @@ class NovelAudioContinuationPolicyTest {
             )
         )
     }
+
+    @Test
+    fun `an in-flight preparation for the same chapter is not restarted`() {
+        // 真机实测：开播后服务端立即查到「计划未就绪」又补发准备，取消了进行中的分析
+        // 并重发一次，同一章分析被请求两次，第二次撞单生成槽返回「服务繁忙」。
+        assertFalse(
+            NovelAudioContinuationPolicy.shouldPrepareOnBlock(
+                missingOrNotReady = true,
+                hasCurrentWork = true,
+                alreadyPreparing = true
+            )
+        )
+    }
 }

@@ -218,7 +218,7 @@ class NovelAudioDownloadCoordinator(
                 state = NovelAudioStates.FAILED,
                 progress = 0
             )
-            Result.Failed(error::class.simpleName.orEmpty())
+            Result.Failed(downloadFailureReason(error))
         }
     }
 
@@ -308,6 +308,15 @@ internal fun canDecodeNovelAudio(file: File): Boolean {
 
 private const val DECODE_TIMEOUT_US = 10_000L
 private const val DECODE_TIMEOUT_MILLIS = 10_000L
+
+/**
+ * 下载失败原因：服务端异常附带 kind（如 TIMEOUT、CONCURRENCY_LIMIT），
+ * 否则真机只能看到笼统的类名，无法区分超时、限流与本地额度。
+ */
+internal fun downloadFailureReason(error: Throwable): String {
+    val name = error::class.simpleName.orEmpty()
+    return if (error is NovelAudioServerException) "$name:${error.kind}" else name
+}
 
 internal object NovelAudioIdentityForDownload {
     fun taskId(planId: String): String =

@@ -1,6 +1,7 @@
 package io.legado.app.help.readaloud.server
 
 import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -12,6 +13,7 @@ class NovelAudioAndroidConfigStoreTest {
     @get:Rule val temp = TemporaryFolder()
 
     @Test fun `file replacement and recreation load the whole blob`() {
+        requireAtomicReplacement()
         val file = File(temp.root, "credentials")
         val blob = AndroidNovelAudioCredentialBlob(file)
         assertNull(blob.read())
@@ -37,6 +39,7 @@ class NovelAudioAndroidConfigStoreTest {
     }
 
     @Test fun `successful commit does not report failure from a subsequent read`() {
+        requireAtomicReplacement()
         val normal = File(temp.root, "credentials")
         normal.writeBytes(byteArrayOf(1))
         val file = object : File(normal.path) {
@@ -68,6 +71,14 @@ class NovelAudioAndroidConfigStoreTest {
         assertFalse(code.contains("defaultSharedPreferences"))
         assertFalse(code.contains("getSharedPreferences"))
         assertTrue(code.contains("\"legado.novel_audio_server.v1\""))
+    }
+
+    private fun requireAtomicReplacement() {
+        // Android uses POSIX rename replacement. Windows File.renameTo cannot replace
+        // an existing target; the real Keystore/device suite verifies this boundary.
+        val source = temp.newFile("rename-source").apply { writeBytes(byteArrayOf(1)) }
+        val target = temp.newFile("rename-target").apply { writeBytes(byteArrayOf(2)) }
+        assumeTrue("Host File.renameTo lacks atomic replacement", source.renameTo(target))
     }
 
     private fun expectStorage(action: () -> Any?) {
