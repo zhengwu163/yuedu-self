@@ -1,4 +1,6 @@
 import importlib
+import contextlib
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,6 +10,38 @@ from unittest.mock import patch
 class PrewarmTest(unittest.TestCase):
     def setUp(self):
         self.module = importlib.import_module("prewarm_http")
+
+    def test_cli_uses_runtime_status_identity_not_health_shape(self):
+        from types import SimpleNamespace
+        calls = []
+        identity = {"runtimeProfile": "identity", "runtimeProfileInfo": {"identity": "identity"}}
+        class Client:
+            def json(self, method, route, body=None, lease=None):
+                calls.append(route)
+                if route.endswith("health"):
+                    return {"status": "ok", "apiVersion": "1"}
+                if route.endswith("status"):
+                    return {"state": "idle", "activeLease": False, **identity}
+                if route.endswith("acquire"):
+                    return {"leaseId": "owned-lease", **identity}
+                return {"state": "idle"}
+            def request(self, method, route, body=None, lease=None, audio=False):
+                return 200, {"content-type": "audio/ogg", "x-tts-profile": "identity"}, b"OggS" + b"x" * 40
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            diagnostic = root / "diagnostics"
+            diagnostic.mkdir()
+            text = diagnostic / "text.private.txt"
+            text.write_text("甲" * 50, encoding="utf-8")
+            config = SimpleNamespace(root=root, active_profile_id="profile")
+            with patch.object(self.module, "load_config", return_value=config), \
+                    patch.object(self.module, "_read_token", return_value="test-only-token"), \
+                    patch.object(self.module, "_Client", return_value=Client()), \
+                    patch.object(self.module, "_probe", return_value={"duration": 1}), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                code = self.module.main(["--config", "unused", "--text-file", str(text), "--voice", "voice", "--cycles", "1", "--cold"])
+        self.assertEqual(0, code)
+        self.assertEqual("/v1/runtime/status", calls[0])
 
     def test_preview_and_long_audio_share_explicit_lease(self):
         calls = []

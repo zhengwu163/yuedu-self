@@ -97,7 +97,7 @@ def main(argv=None):
         chunks = split_text(path.read_text(encoding="utf-8"))
         _require(1 <= args.cycles <= 10)
         client = _Client(config, _read_token(config))
-        identity = _identity(client.json("GET", "/v1/health"))
+        identity = _identity(client.json("GET", "/v1/runtime/status"))
         output = _diagnostics(config)
         report = {"profile": config.active_profile_id, "hanCounts": [han_count(text) for text in chunks], "cycles": []}
         for number in range(1, args.cycles + 1):
