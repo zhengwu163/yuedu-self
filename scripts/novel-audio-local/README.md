@@ -251,3 +251,33 @@ This stage does not change Android production behavior, merge the VoiceStudio
 line, download or alter model weights, expose a LAN endpoint by default, or
 publish an Android package. Every required Windows stage must have actual
 `PASS` evidence before Android integration begins.
+
+## Windows free-resource gate and explicit-lease warmup
+
+Real Worker admission now checks GPU 0 free VRAM, available physical RAM and
+available commit before spawning, then rechecks remaining resources before each
+native model load. Insufficient resources return HTTP 503 `insufficient_resources`;
+an unavailable resource probe returns `resource_check_failed`. Fake backends skip
+this gate. This is admission control, not an allocation reservation; competing
+applications can still consume resources after the check.
+
+Initial headroom thresholds (MiB): combined 9B 12288/8192/8192, combined 4B
+10240/8192/8192; text 9B 7168/4096/4096, text 4B 4096/4096/4096;
+TTS 5120/4096/4096, in VRAM/RAM/commit order. These are conservative initial
+thresholds, not guarantees. They must be recalibrated from successful quiet-host
+measurements before claiming universal sufficiency.
+
+For warmup, use one explicit Lease: acquire, short voices/preview, synthesize
+40–60 Han characters per segment, then release. Keep the Lease between segments;
+automatic leases unload the model and lose the warmup. Warmup itself may exceed
+the phone's 30-second per-audio budget on a cold model, so schedule it before
+playback rather than claiming it removes the cold-start delay.
+
+`prewarm_http.py --config <configuration> --text-file <diagnostics text file>
+--voice <public voiceAssetId> --cycles 3` repeats three independent warmup cycles,
+validates Ogg/Opus output using ffprobe, and writes timings/audio under diagnostics.
+The input file must be within the configuration root's diagnostics directory.
+`--cold` runs the same long segments without preview for an equivalent control.
+Timings include first-long completion measured from the end of preview; text,
+credentials and backend output are never logged. Text is split toward 50 Han
+characters (short tails may remain), with a maximum of 60 and 1200 UTF-16 units.

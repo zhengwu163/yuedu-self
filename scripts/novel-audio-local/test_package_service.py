@@ -31,6 +31,13 @@ class ServiceBundleTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("# fixture\n", encoding="utf-8")
 
+    def test_resource_gate_and_prewarm_are_in_source_allowlist(self):
+        # Both runtime modules must ship in the bundle or the Windows retest
+        # downloads a service that cannot import the resource gate or prewarm.
+        from package_service import SOURCE_FILES
+        self.assertIn("scripts/novel-audio-local/resource_gate.py", SOURCE_FILES)
+        self.assertIn("scripts/novel-audio-local/prewarm_http.py", SOURCE_FILES)
+
     def test_bundle_only_contains_allowed_source_and_matching_hashes(self):
         from package_service import SOURCE_FILES, build_bundle
         with tempfile.TemporaryDirectory() as directory:

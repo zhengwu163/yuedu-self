@@ -17,6 +17,7 @@ from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_ope
 from audio import AudioError, encode_ogg_opus
 from backend import LocalModelBackend
 from voices import VoiceCatalogError
+from resource_gate import ensure_resources
 from scripts.novel_audio_server.errors import (
     BackendError,
     InvalidBackendResponseError,
@@ -186,6 +187,7 @@ class QwenTextAdapter:
         if self._probe_health():
             raise RunnerUnavailableError()
 
+        ensure_resources("text", profile_id=getattr(self.profile, "profile_id", None))
         command = self._command()
         try:
             process = self.runner(
@@ -394,6 +396,7 @@ class QwenTtsAdapter:
         if self.model_loader is not None:
             self.model = self.model_loader(model_path)
             return self.model
+        ensure_resources("tts", profile_id=getattr(self.profile, "profile_id", None))
         try:
             import torch
             from qwen_tts import Qwen3TTSModel

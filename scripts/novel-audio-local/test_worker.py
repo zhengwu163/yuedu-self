@@ -186,7 +186,7 @@ class WorkerProcessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config_path = self._config(directory)
             sentinel = object()
-            with patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
+            with patch("worker.ensure_resources"), patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
                 result = SubprocessWorkerFactory(config_path).start("profile-9b")
 
             self.assertIs(sentinel, result)
@@ -208,7 +208,7 @@ class WorkerProcessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             config_path = self._config(directory)
             sentinel = object()
-            with patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
+            with patch("worker.ensure_resources"), patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
                 SubprocessWorkerFactory(config_path, fake=True).start("fake-local-v1")
 
             command = constructor.call_args.args[0]
@@ -224,7 +224,7 @@ class WorkerProcessTest(unittest.TestCase):
             config_path.write_text(json.dumps(value), encoding="utf-8")
             sentinel = object()
 
-            with patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
+            with patch("worker.ensure_resources"), patch("worker.SubprocessWorker", return_value=sentinel) as constructor:
                 result = SubprocessWorkerFactory(config_path).start("profile-9b")
 
             self.assertIs(sentinel, result)

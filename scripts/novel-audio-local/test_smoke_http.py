@@ -47,6 +47,14 @@ class FakeHttpAgent:
         owner = self
 
         class Handler(BaseHTTPRequestHandler):
+            def handle(self):
+                # Windows may report a timed-out client disconnect during the
+                # final handler flush, outside dispatch's exception handler.
+                try:
+                    super().handle()
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
             def log_message(self, *_):
                 pass
 
@@ -59,7 +67,7 @@ class FakeHttpAgent:
             def dispatch(self):
                 try:
                     owner.dispatch(self)
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     pass
                 except Exception:
                     owner.validate_errors.append("invalid_request")
@@ -306,6 +314,12 @@ class SmokeHttpTest(unittest.TestCase):
                 "/v1/chapter/analyze", "/v1/voices/preview", "/v1/tts/synthesize"
             }:
                 self.assertEqual("/v1/runtime/status", self.agent.requests[index + 1][1])
+
+    def test_expected_disconnect_during_handler_flush_is_quiet(self):
+        handler = object.__new__(self.agent.server.RequestHandlerClass)
+        for error in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            with self.subTest(error=error.__name__), patch.object(BaseHTTPRequestHandler, "handle", side_effect=error()):
+                self.agent.server.RequestHandlerClass.handle(handler)
 
     def test_base_narrator_only_allows_empty_match_candidates(self):
         # Real VoiceCatalog.match excludes narrator assets.

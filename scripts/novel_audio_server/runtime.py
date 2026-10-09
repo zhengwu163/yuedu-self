@@ -16,6 +16,8 @@ from .errors import (
     WorkerUnavailableError,
     WorkerStartError,
     WorkerStopError,
+    ResourceUnavailableError,
+    ResourceCheckError,
 )
 
 
@@ -176,6 +178,8 @@ class RuntimeManager:
             self._cancel_startup(startup)
             raise RequestCancelledError()
         if startup.error is not None:
+            if isinstance(startup.error, (ResourceUnavailableError, ResourceCheckError)):
+                raise startup.error from None
             raise WorkerStartError() from None
 
         with self._lock:

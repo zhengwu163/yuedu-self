@@ -3,6 +3,7 @@ import json
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 import wave
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -90,6 +91,11 @@ class _FakeProcess:
 
 
 class LocalBackendTest(unittest.TestCase):
+    def setUp(self):
+        resource_check = patch("qwen_backend.ensure_resources")
+        resource_check.start()
+        self.addCleanup(resource_check.stop)
+
     def runtime_profile(self):
         text_asset = ModelAsset(
             asset_id="future-text",

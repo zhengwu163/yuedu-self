@@ -37,6 +37,9 @@ def wav_bytes(sample=0):
 
 class ProfileModesTest(unittest.TestCase):
     def setUp(self):
+        resource_check = patch("qwen_backend.ensure_resources")
+        resource_check.start()
+        self.addCleanup(resource_check.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)

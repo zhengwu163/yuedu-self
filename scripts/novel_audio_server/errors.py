@@ -49,6 +49,14 @@ class WorkerStartError(NovelAudioError):
     status, code = 503, "worker_start_failed"
 
 
+class ResourceUnavailableError(WorkerStartError):
+    code = "insufficient_resources"
+
+
+class ResourceCheckError(WorkerStartError):
+    code = "resource_check_failed"
+
+
 class WorkerStopError(NovelAudioError):
     status, code = 503, "worker_stop_failed"
 

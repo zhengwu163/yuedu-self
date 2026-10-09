@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.novel_audio_server.errors import (
     NovelAudioError, RequestCancelledError, WorkerStartError, WorkerUnavailableError,
+    ResourceUnavailableError, ResourceCheckError,
 )
 from scripts.novel_audio_server.protocol import (
     analysis_request,
@@ -41,6 +42,7 @@ from config import (
 )
 from model_registry import sha256_file
 from qwen_backend import QwenBackend
+from resource_gate import ensure_resources
 from voices import VoiceCatalog
 
 
@@ -50,6 +52,7 @@ MAX_LINE = 24 * 1024 * 1024
 # the first analyze/synthesize request, after readiness has already succeeded.
 STARTUP_TIMEOUT = DEFAULT_WORKER_STARTUP_TIMEOUT
 IPC_TIMEOUT = DEFAULT_WORKER_IPC_TIMEOUT
+RESOURCE_ERRORS = {error.code: error for error in (ResourceUnavailableError, ResourceCheckError)}
 
 
 def _timeout(value, name):
@@ -149,7 +152,9 @@ class SubprocessWorker:
             or readiness.get("ok") is not True
             or readiness.get("event") != "ready"
         ):
-            self._fail_start()
+            code = readiness.get("code") if isinstance(readiness, dict) else None
+            error_type = RESOURCE_ERRORS.get(code) if isinstance(code, str) else None
+            self._fail_start(error_type() if error_type else None)
         identity = readiness.get("profile")
         if not isinstance(identity, str) or (
             expected_identity is not None and identity != expected_identity
@@ -157,8 +162,8 @@ class SubprocessWorker:
             self._fail_start()
         self.profile = identity
 
-    def _fail_start(self):
-        error = WorkerStartError()
+    def _fail_start(self, error=None):
+        error = error or WorkerStartError()
         try:
             self.close()
         except Exception:
@@ -217,6 +222,9 @@ class SubprocessWorker:
         if isinstance(response, Exception):
             raise WorkerUnavailableError() from None
         if not isinstance(response, dict) or not response.get("ok"):
+            code = response.get("code") if isinstance(response, dict) else None
+            if isinstance(code, str) and code in RESOURCE_ERRORS:
+                raise RESOURCE_ERRORS[code]()
             raise WorkerUnavailableError()
         return response.get("result")
 
@@ -348,6 +356,8 @@ class SubprocessWorkerFactory:
             config = load_config(self.config_path)
         except Exception:
             raise WorkerStartError() from None
+        if not self.fake:
+            ensure_resources(profile_id=profile)
         command = [
             sys.executable if self.fake else str(config.tts.python_executable),
             "-u",
