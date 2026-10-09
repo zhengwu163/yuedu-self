@@ -19,6 +19,7 @@ class HttpTest(unittest.TestCase):
     def setUp(self):
         self.calls = []
         self.speech_status = 200
+        self.speech_delay = 0
 
         def transport(method, path, payload=None):
             self.calls.append((method, path))
@@ -36,6 +37,9 @@ class HttpTest(unittest.TestCase):
                     "newCharacters": [],
                     "aliasUpdates": [],
                 }).encode()
+            if self.speech_delay:
+                import time
+                time.sleep(self.speech_delay)
             return self.speech_status, {"content-type": "audio/ogg"}, b"OggS-fixture"
 
         registry = VoiceRegistry.from_records([{
@@ -110,6 +114,31 @@ class HttpTest(unittest.TestCase):
         self.assertRegex(lines[1], r"GET /v1/voices 401 \d+ms unauthorized$")
         self.assertNotIn("fixture-gateway-token", stderr.getvalue())
         self.assertNotIn("probe", stderr.getvalue())
+
+    def test_access_log_records_requests_abandoned_by_the_client(self):
+        # 真机实测：App 超时断开后服务端不写响应，也没有任何日志，请求像“消失”了。
+        import contextlib
+        import io
+        import socket
+        import time
+
+        self.speech_delay = 0.6
+        raw = json.dumps(self.audio_request).encode()
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            client = socket.create_connection(self.server.server_address, timeout=2)
+            client.sendall(
+                b"POST /v1/tts/synthesize HTTP/1.1\r\nHost: x\r\n"
+                b"Authorization: Bearer fixture-gateway-token\r\n"
+                b"Content-Type: application/json\r\n"
+                + f"Content-Length: {len(raw)}\r\n\r\n".encode() + raw
+            )
+            time.sleep(0.2)
+            client.close()
+            deadline = time.monotonic() + 3
+            while "synthesize" not in stderr.getvalue() and time.monotonic() < deadline:
+                time.sleep(0.05)
+        self.assertRegex(stderr.getvalue(), r"POST /v1/tts/synthesize 499 \d+ms client_closed\n$")
 
     def send(self, method, path, raw=b"", headers=()):
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=2)

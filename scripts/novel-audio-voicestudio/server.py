@@ -170,6 +170,15 @@ def create_server(config, gateway):
 
         def _handle(self):
             self._started = time.monotonic()
+            self._responded = False
+            try:
+                self._dispatch()
+            finally:
+                if not self._responded:
+                    # 客户端超时断开或请求被取消时没有响应可写；仍留一行日志，避免真机侧“请求消失”。
+                    self._log_access(499, {"error": {"code": "client_closed"}})
+
+        def _dispatch(self):
             try:
                 authorizations = self.headers.get_all("Authorization", [])
                 if len(authorizations) != 1 or not gateway.authorized(authorizations[0]):
@@ -287,6 +296,7 @@ def create_server(config, gateway):
             try:
                 self.wfile.write(data)
             finally:
+                self._responded = True
                 self._log_access(status, body)
 
         def _log_access(self, status, body):
