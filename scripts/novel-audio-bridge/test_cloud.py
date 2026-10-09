@@ -89,6 +89,27 @@ class CloudTest(unittest.TestCase):
         client.analyze(analysis())
         self.assertGreater(transport.requests[0][1], 30)
 
+    def test_long_android_unit_ids_reach_model_as_short_aliases(self):
+        # 真机实测：模型抄错 66 位哈希 unitId 导致整章覆盖校验失败。
+        request = analysis()
+        long_ids = ["u_" + "a" * 64, "u_" + "b" * 64]
+        for unit, unit_id in zip(request["units"], long_ids):
+            unit["unitId"] = unit_id
+        request["previousContext"]["recentAssignments"] = [{"unitId": "u_" + "c" * 64,
+                                                            "speakerId": "char_1"}]
+        answer = {"assignments": [{"unitId": "u2", "speakerId": "char_1"},
+                                  {"unitId": "u1", "speakerId": "narrator"}],
+                  "newCharacters": [], "aliasUpdates": []}
+        client, transport = self.client([response({"choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})])
+        result = client.analyze(request)
+        sent = json.loads(json.loads(transport.requests[0][0].data)["messages"][1]["content"])
+        self.assertEqual(["u1", "u2"], [unit["unitId"] for unit in sent["units"]])
+        self.assertEqual([{"unitId": "p1", "speakerId": "char_1"}],
+                         sent["previousContext"]["recentAssignments"])
+        self.assertNotIn("a" * 64, transport.requests[0][0].data.decode())
+        self.assertEqual([long_ids[1], long_ids[0]], [item["unitId"] for item in result["assignments"]])
+
     def test_analysis_output_failures_have_distinct_codes(self):
         cases = (({"finish_reason": "length", "message": {"content": "{}"}}, "analysis_truncated"),
                  ({"finish_reason": "stop", "message": {"content": "不是 JSON"}}, "analysis_invalid_json"),

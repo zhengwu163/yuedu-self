@@ -177,10 +177,18 @@ class BailianClient:
     def analyze(self, request):
         request = analysis_request(request)
         deadline = time.monotonic() + 40
+        # Android 的 unitId 是 66 位哈希，模型逐字抄写常出错；发给模型前换成短别名，返回后映射回原 ID。
+        unit_alias = {unit["unitId"]: f"u{index}" for index, unit in enumerate(request["units"], 1)}
+        recent = request["previousContext"]["recentAssignments"]
+        model_request = dict(request, units=[
+            {"unitId": unit_alias[unit["unitId"]], "text": unit["text"]} for unit in request["units"]
+        ], previousContext={"recentAssignments": [
+            {"unitId": f"p{index}", "speakerId": item["speakerId"]} for index, item in enumerate(recent, 1)
+        ]})
         # 纯文本使用百炼 OpenAI 兼容接口；原始 HTTP 的扩展参数直接放顶层。
         payload = {"model": TEXT_MODEL, "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(request, ensure_ascii=False)}],
+            {"role": "user", "content": json.dumps(model_request, ensure_ascii=False)}],
             "temperature": 0.1, "stream": False,
             "enable_thinking": False, "max_tokens": 4096,
             "response_format": {"type": "json_object"}}
@@ -194,9 +202,15 @@ class BailianClient:
         if not finished:
             raise AnalysisTruncatedError()
         try:
-            return parse_analysis_json(content)
+            result = parse_analysis_json(content)
         except (TypeError, ValueError):
             raise AnalysisJsonError() from None
+        original = {alias: unit_id for unit_id, alias in unit_alias.items()}
+        for item in result["assignments"]:
+            # 未知别名原样保留，由 analysis_response 按覆盖性错误拒绝。
+            if isinstance(item, dict) and isinstance(item.get("unitId"), str):
+                item["unitId"] = original.get(item["unitId"], item["unitId"])
+        return result
 
     def synthesize(self, request):
         deadline = time.monotonic() + 25
