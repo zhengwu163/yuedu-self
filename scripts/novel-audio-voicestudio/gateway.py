@@ -160,8 +160,16 @@ class NovelAudioGateway:
         try:
             if not _invoke(self.director.health, context=context).ready:
                 raise NotReadyError()
-            with self._generation_slot():
-                value = _invoke(self.director.analyze, request, context=context)
+            # 分析结果要留给缓存和等待者：首个请求的客户端中途断开（真机上 App 会取消后立即重发）
+            # 不应作废这次已在计费的分析，因此用独立时限而非客户端连接来约束它。
+            work = RequestContext(self.request_timeout)
+            self._register_context(work)
+            try:
+                with self._generation_slot():
+                    value = _invoke(self.director.analyze, request, context=work)
+            finally:
+                self._unregister_context(work)
+                work.cancel()
             with self._analysis_lock:
                 # 同一章节文本的分析结果可复用：后续合成失败重试时不再重复消耗分析额度。
                 self._analysis_cache[key] = copy.deepcopy(value)

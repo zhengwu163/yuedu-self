@@ -221,6 +221,37 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual(200, results[0][0])
         self.assertEqual(1, SlowDirector.calls)
 
+    def test_analysis_survives_the_first_client_leaving_for_a_waiting_retry(self):
+        # 真机实测：App 取消首个分析后立即重发；首个请求的取消不能让重发拿到 429。
+        import threading
+
+        from lifecycle import RequestContext
+
+        started, release = threading.Event(), threading.Event()
+
+        class SlowDirector(FakeDirector):
+            def analyze(self, request, context=None):
+                started.set()
+                release.wait(2)
+                context.check()
+                return super().analyze(request)
+
+        gateway = NovelAudioGateway(FakeSpeech(), SlowDirector(), "local-token")
+        leaving = RequestContext(5)
+        first = threading.Thread(target=gateway.respond, args=(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        ), kwargs={"context": leaving})
+        first.start()
+        self.assertTrue(started.wait(2))
+        leaving.cancel()
+        threading.Timer(0.1, release.set).start()
+        status, _, body = gateway.respond(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        )
+        first.join(2)
+        self.assertEqual(200, status)
+        self.assertEqual("narrator", body["assignments"][0]["speakerId"])
+
     def test_different_chapters_still_share_the_single_generation_slot(self):
         import threading
 
