@@ -169,6 +169,7 @@ def create_server(config, gateway):
             self._handle()
 
         def _handle(self):
+            self._started = time.monotonic()
             try:
                 authorizations = self.headers.get_all("Authorization", [])
                 if len(authorizations) != 1 or not gateway.authorized(authorizations[0]):
@@ -283,7 +284,18 @@ def create_server(config, gateway):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(data)
+            try:
+                self.wfile.write(data)
+            finally:
+                self._log_access(status, body)
+
+        def _log_access(self, status, body):
+            # 只记录路由、状态与错误码：查询串、请求头和正文可能含令牌或小说内容。
+            elapsed = int((time.monotonic() - getattr(self, "_started", time.monotonic())) * 1000)
+            line = f"{self.command} {self.path.split('?', 1)[0]} {status} {elapsed}ms"
+            if isinstance(body, dict) and isinstance(body.get("error"), dict):
+                line += f" {body['error'].get('code', '')}"
+            print(line, file=sys.stderr, flush=True)
 
     class Server(ThreadingHTTPServer):
         daemon_threads = True

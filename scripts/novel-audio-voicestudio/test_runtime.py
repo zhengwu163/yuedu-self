@@ -95,6 +95,22 @@ class HttpTest(unittest.TestCase):
         self.thread.join(timeout=2)
         self.assertFalse(self.thread.is_alive())
 
+    def test_access_log_records_route_status_and_error_code_without_secrets(self):
+        # 真机联调只能看到 App 的笼统报错；服务端须留下每个请求的路径、状态与错误码。
+        import contextlib
+        import io
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.json_request("GET", "/v1/health")
+            self.send("GET", "/v1/voices?probe=1")
+        lines = stderr.getvalue().splitlines()
+        self.assertEqual(2, len(lines))
+        self.assertRegex(lines[0], r"GET /v1/health 200 \d+ms$")
+        self.assertRegex(lines[1], r"GET /v1/voices 401 \d+ms unauthorized$")
+        self.assertNotIn("fixture-gateway-token", stderr.getvalue())
+        self.assertNotIn("probe", stderr.getvalue())
+
     def send(self, method, path, raw=b"", headers=()):
         connection = http.client.HTTPConnection(*self.server.server_address, timeout=2)
         try:
