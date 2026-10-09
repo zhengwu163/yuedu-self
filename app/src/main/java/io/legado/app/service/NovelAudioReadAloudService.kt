@@ -12,6 +12,7 @@ import io.legado.app.constant.AppLog
 import io.legado.app.constant.EventBus
 import io.legado.app.constant.IntentAction
 import io.legado.app.data.appDb
+import io.legado.app.data.entities.NovelAudioChapterPlanEntity
 import io.legado.app.data.entities.NovelAudioSegmentArtifactEntity
 import io.legado.app.data.entities.NovelAudioPlanJson
 import io.legado.app.data.entities.NovelAudioStates
@@ -94,7 +95,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                     hasCurrentWork = AudioPrefetchPlayback.lifecycle.isCurrent(work)
                 )
             ) {
-                prepareAndPlay(work)
+                prepareAndPlay(work, readyPlanId = state.planId)
             } else if (shouldHandlePreparationFailure(
                     state = state,
                     currentBookUrl = bookUrl,
@@ -254,7 +255,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         pauseReadAloud()
     }
 
-    private fun prepareAndPlay(work: AudioPrefetchLifecycle.Work?) {
+    private fun prepareAndPlay(work: AudioPrefetchLifecycle.Work?, readyPlanId: String? = null) {
         if (work != null &&
             !AudioPrefetchPlayback.lifecycle.isCurrent(work)
         ) return
@@ -266,8 +267,13 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         prepareJob = execute {
             val physicalBookUrl = ReadBook.book?.bookUrl.orEmpty()
             val chapterIndex = ReadBook.durChapterIndex
-            val entity = appDb.novelAudioDao.currentChapterPlan(physicalBookUrl, chapterIndex)
-                ?: return@execute PlaybackPreparation.Blocked(BlockReason.MISSING_PLAN)
+            val entity = selectPlaybackPlan(
+                readyPlanId = readyPlanId,
+                physicalBookUrl = physicalBookUrl,
+                chapterIndex = chapterIndex,
+                planById = appDb.novelAudioDao::chapterPlan,
+                currentPlan = { appDb.novelAudioDao.currentChapterPlan(physicalBookUrl, chapterIndex) }
+            ) ?: return@execute PlaybackPreparation.Blocked(BlockReason.MISSING_PLAN)
             if (entity.state != NovelAudioStates.READY) {
                 return@execute PlaybackPreparation.Blocked(
                     reason = BlockReason.PLAN_NOT_READY,
@@ -522,6 +528,23 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
 
     companion object {
         private const val AUDIO_DIRECTORY = "novel-audio"
+
+        /**
+         * 准备完成事件带来的 planId 优先于「本章最新计划」查询：代际号在进程重启后从 1 重新计数，
+         * 上次进程留下的高代际失败计划会排在刚准备好的计划前面，导致播放判定未就绪并无限重新准备。
+         */
+        fun selectPlaybackPlan(
+            readyPlanId: String?,
+            physicalBookUrl: String,
+            chapterIndex: Int,
+            planById: (String) -> NovelAudioChapterPlanEntity?,
+            currentPlan: () -> NovelAudioChapterPlanEntity?
+        ): NovelAudioChapterPlanEntity? {
+            val ready = readyPlanId?.takeIf { it.isNotBlank() }?.let(planById)?.takeIf {
+                it.physicalBookUrl == physicalBookUrl && it.chapterIndex == chapterIndex
+            }
+            return ready ?: currentPlan()
+        }
 
         fun shouldResumeAfterPreparation(
             state: NovelAudioPreparationState,

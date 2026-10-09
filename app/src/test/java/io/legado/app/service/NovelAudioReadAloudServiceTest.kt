@@ -1,5 +1,6 @@
 package io.legado.app.service
 
+import io.legado.app.data.entities.NovelAudioChapterPlanEntity
 import io.legado.app.data.entities.NovelAudioSegmentArtifactEntity
 import io.legado.app.data.entities.NovelAudioStates
 import io.legado.app.help.readaloud.NovelAudioPreparationState
@@ -16,6 +17,34 @@ import java.nio.file.Files
 import java.security.MessageDigest
 
 class NovelAudioReadAloudServiceTest {
+
+    @Test
+    fun readyEventPlanWinsOverStaleHigherGenerationPlanFromEarlierProcess() {
+        // 真机实测：代际号随进程重启归 1，旧进程留下的 generation=4 失败计划被当作当前计划，
+        // 播放判定未就绪后反复重新准备，直至耗尽本地分析额度。
+        val ready = NovelAudioChapterPlanEntity(
+            planId = "plan:ready", workKey = "work", physicalBookUrl = "book", chapterIndex = 0,
+            generation = 1L, state = NovelAudioStates.READY
+        )
+        val stale = ready.copy(planId = "plan:stale", generation = 4L, state = NovelAudioStates.FAILED)
+        val plans = listOf(ready, stale).associateBy { it.planId }
+
+        assertEquals(
+            "plan:ready",
+            NovelAudioReadAloudService.selectPlaybackPlan(
+                "plan:ready", "book", 0, plans::get
+            ) { stale }?.planId
+        )
+        // 事件 planId 属于别的章节或为空时，仍按原有「本章最新计划」查询。
+        assertEquals(
+            "plan:stale",
+            NovelAudioReadAloudService.selectPlaybackPlan("plan:ready", "book", 1, plans::get) { stale }?.planId
+        )
+        assertEquals(
+            "plan:stale",
+            NovelAudioReadAloudService.selectPlaybackPlan(null, "book", 0, plans::get) { stale }?.planId
+        )
+    }
 
     @Test
     fun preparationReadyEventRequiresCurrentChapterGenerationAndActivePlaybackWork() {
