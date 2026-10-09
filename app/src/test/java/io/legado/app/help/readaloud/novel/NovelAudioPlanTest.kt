@@ -73,6 +73,33 @@ class NovelAudioPlanTest {
     }
 
     @Test
+    fun `server segment limit splits long units into replayable segments`() {
+        val paragraph = "甲乙丙丁戊己庚辛壬癸。".repeat(12)
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            bookUrl = "book://one",
+            chapterIndex = 0,
+            chapterUrl = "chapter",
+            strings = listOf(paragraph),
+            rules = ReadAloudPreprocessRuleConfig().freeze()
+        )
+        val whole = NovelAudioPlanFactory.create(snapshot, "server-a", 1L)
+        val split = NovelAudioPlanFactory.create(snapshot, "server-a", 1L, maxSegmentChars = 50)
+
+        assertEquals(1, whole.segments.size)
+        // 每句 10 个发音字，50 字上限恰好 5 句一段。
+        assertEquals(3, split.segments.size)
+        assertNotEquals(whole.planId, split.planId)
+        assertEquals(paragraph, split.segments.joinToString("") { it.text })
+        split.segments.forEach { segment ->
+            assertTrue(segment.text.count { Character.isLetterOrDigit(it) } <= 50)
+            val replayed = segment.orderedRanges.joinToString("\n") {
+                snapshot.textSnapshot.paragraphs[it.paragraphIndex].text.substring(it.start, it.end)
+            }
+            assertEquals(segment.text, replayed)
+        }
+    }
+
+    @Test
     fun `segment id hashes text ranges and playback settings`() {
         val base = NovelAudioSegmentIntent.create(
             orderedRanges = listOf(NovelAudioTextRange(0, 0, 2)),

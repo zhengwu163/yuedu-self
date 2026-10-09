@@ -119,9 +119,11 @@ object NovelAudioPlanFactory {
         speakerIds: Map<String, Long> = emptyMap(),
         voiceBindings: Map<Long, NovelAudioVoiceBinding> = emptyMap(),
         language: String = "zh-CN",
-        speed: Double = 1.0
+        speed: Double = 1.0,
+        // 服务端声明的单次合成发音字数上限；0 表示不限制（云端桥接不声明）。
+        maxSegmentChars: Int = 0
     ): NovelAudioChapterPlan {
-        val segments = parsedUnits.map { unit ->
+        val segments = parsedUnits.flatMap { unit ->
             val speakerId = if (unit.roleType == "narrator") {
                 0L
             } else {
@@ -131,17 +133,20 @@ object NovelAudioPlanFactory {
                     )
             }
             val binding = voiceBindings[speakerId]
-            NovelAudioSegmentIntent.create(
-                orderedRanges = unit.ranges.map {
-                    NovelAudioTextRange(it.paragraphIndex, it.start, it.end)
-                },
-                text = unit.text,
-                speakerId = speakerId,
-                voiceAssetId = binding?.voiceAssetId.orEmpty(),
-                bindingRevision = binding?.revision ?: 0L,
-                language = language,
-                speed = speed
-            )
+            TextUnitParser.splitForSynthesis(snapshot.textSnapshot, unit, maxSegmentChars)
+                .map { (text, ranges) ->
+                    NovelAudioSegmentIntent.create(
+                        orderedRanges = ranges.map {
+                            NovelAudioTextRange(it.paragraphIndex, it.start, it.end)
+                        },
+                        text = text,
+                        speakerId = speakerId,
+                        voiceAssetId = binding?.voiceAssetId.orEmpty(),
+                        bindingRevision = binding?.revision ?: 0L,
+                        language = language,
+                        speed = speed
+                    )
+                }
         }
         return NovelAudioChapterPlan(
             planId = NovelAudioIdentity.storageKey(

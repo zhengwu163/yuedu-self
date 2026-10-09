@@ -20,7 +20,12 @@ internal object NovelAudioJson {
     }
 
     fun runtimeLease(json: String): RuntimeLease = decode(json) { root ->
-        RuntimeLease(root.text("leaseId"), root.text("runtimeProfile"))
+        RuntimeLease(
+            root.text("leaseId"),
+            root.text("runtimeProfile"),
+            root.optionalInt("maxSegmentChars", 1..MAX_SEGMENT_CHARS) ?: 0,
+            root.optionalBool("selfHosted") ?: false
+        )
     }
 
     fun runtimeStatus(json: String): RuntimeStatus = decode(json) { root ->
@@ -115,6 +120,21 @@ internal object NovelAudioJson {
         return value.asBoolean
     }
 
+    /** 缺省返回 null；出现时必须是 JSON 布尔，避免 "true" 被当成真。 */
+    private fun JsonObject.optionalBool(key: String): Boolean? {
+        if (get(key) == null) return null
+        return bool(key)
+    }
+
+    /** 缺省返回 null；一旦出现就必须是范围内的整数，避免 "50" 或 50.5 被静默截断。 */
+    private fun JsonObject.optionalInt(key: String, range: IntRange): Int? {
+        val value = get(key) ?: return null
+        require(value.isJsonPrimitive && value.asJsonPrimitive.isNumber)
+        val number = value.asBigDecimal
+        require(number.stripTrailingZeros().scale() <= 0)
+        return number.intValueExact().also { require(it in range) }
+    }
+
     private fun JsonObject.objects(key: String): List<JsonObject> {
         val value = get(key)
         require(value != null && value.isJsonArray)
@@ -129,6 +149,9 @@ internal object NovelAudioJson {
             it.asString
         }
     }
+
+    // 与合成请求的单次文本上限一致。
+    private const val MAX_SEGMENT_CHARS = 1200
 
     private val RUNTIME_STATES = setOf(
         "idle",

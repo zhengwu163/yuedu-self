@@ -25,6 +25,7 @@ import java.io.InterruptedIOException
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -36,6 +37,7 @@ class NovelAudioServerException(val kind: String) : NoStackTraceException(
         "AUTH" -> "家庭 AI 服务鉴权失败，请检查访问令牌"
         "RATE_LIMIT" -> "家庭 AI 服务繁忙，请稍后重试"
         "CONCURRENCY_LIMIT" -> "家庭 AI 服务正在生成其他内容，请稍后重试"
+        "INSUFFICIENT_RESOURCES" -> "家庭 AI 电脑显卡或内存不足，请关闭占用显卡的程序后重试"
         "INVALID_LEASE" -> "家庭 AI 服务会话已失效，请重新开始生成"
         "UNSUPPORTED" -> "当前 AI 服务不支持运行时模型会话"
         "LOCAL_BUDGET_EXHAUSTED" -> "AI 听书本地试用额度已用尽"
@@ -57,6 +59,7 @@ class NovelAudioServerClient(
     private val budgetLedger: NovelAudioBudgetLedger? = null
 ) {
     private val base = NovelAudioServerCredentials.parseBaseUrl(baseUrl)
+    private val selfHostedLeases: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     init {
         if (timeoutLimitMillis !in 1..MAX_TIMEOUT_MILLIS) throw NovelAudioServerException("CONFIG")
@@ -94,6 +97,12 @@ class NovelAudioServerClient(
         val body = encodePayload(request)
         leaseId?.let(::checkLease)
         peekToken()
+        if (isSelfHosted(leaseId)) {
+            return NovelAudioJson.analysis(
+                json("chapter/analyze", body, ANALYSIS_TIMEOUT_MILLIS, leaseId, "POST"),
+                request
+            )
+        }
         val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
         val reservation = ledger.reserve(
             kind = NovelAudioBudgetLedger.Kind.ANALYSIS,
@@ -150,16 +159,30 @@ class NovelAudioServerClient(
                 null,
                 "POST"
             )
-        )
+        ).also { lease ->
+            if (lease.selfHosted) selfHostedLeases.add(lease.leaseId)
+        }
     }
 
     suspend fun releaseRuntime(leaseId: String) = withContext(Dispatchers.IO) {
         checkLease(leaseId)
-        NovelAudioJson.runtimeRelease(
-            json("runtime/release", ByteArray(0), 15_000, leaseId, "POST")
-        )
+        try {
+            NovelAudioJson.runtimeRelease(
+                json("runtime/release", ByteArray(0), 15_000, leaseId, "POST")
+            )
+        } finally {
+            // 释放失败时租约也不再被本端使用，豁免标记不能残留到后续请求。
+            selfHostedLeases.remove(leaseId)
+        }
         Unit
     }
+
+    /**
+     * 自托管服务（用户自己的电脑）声明的租约不消耗云端试用额度；
+     * 无租约或云端桥接的请求仍按额度预占。
+     */
+    private fun isSelfHosted(leaseId: String?): Boolean =
+        leaseId != null && leaseId in selfHostedLeases
 
     suspend fun runtimeStatus(): RuntimeStatus = withContext(Dispatchers.IO) {
         NovelAudioJson.runtimeStatus(
@@ -180,6 +203,10 @@ class NovelAudioServerClient(
             val body = encodePayload(request)
             leaseId?.let(::checkLease)
             peekToken()
+            if (isSelfHosted(leaseId)) {
+                val result = exchange(path, body, TTS_TIMEOUT_MILLIS, true, leaseId, "POST")
+                return@withContext SynthesizedAudio(result.bytes, result.type, result.profile)
+            }
             val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
             val reservation = ledger.reserve(
                 kind = NovelAudioBudgetLedger.Kind.TTS,
@@ -188,7 +215,7 @@ class NovelAudioServerClient(
                 vendorRequests = (request.text.codePointCount(0, request.text.length) + 599) / 600
             )
             try {
-                val result = exchange(path, body, 30_000, true, leaseId, "POST")
+                val result = exchange(path, body, TTS_TIMEOUT_MILLIS, true, leaseId, "POST")
                 SynthesizedAudio(result.bytes, result.type, result.profile)
             } finally {
                 reservation.close()
@@ -377,6 +404,11 @@ class NovelAudioServerClient(
         internal const val ANALYSIS_TIMEOUT_MILLIS = 100_000L
         /** 单次调用总时长上限；其余接口仍按各自更短的期限调用。 */
         internal const val MAX_TIMEOUT_MILLIS = ANALYSIS_TIMEOUT_MILLIS
+        /**
+         * 单次合成/试听。家庭电脑本地 TTS 约 1.6 倍实时，冷启动的 50 字段实测近 30 秒，
+         * 留出余量避免把正在生成的请求判超时后重发。
+         */
+        internal const val TTS_TIMEOUT_MILLIS = 60_000L
         private const val JSON_LIMIT = 2 * 1024 * 1024
         private const val AUDIO_LIMIT = 16 * 1024 * 1024
         private const val ERROR_BODY_LIMIT = 4096L
@@ -414,6 +446,8 @@ class NovelAudioServerClient(
                             bridgeCode == "free_quota_only" -> "FREE_QUOTA_EXHAUSTED"
                             bridgeCode == "local_trial_limit" -> "LOCAL_BUDGET_EXHAUSTED"
                             bridgeCode == "busy" -> "CONCURRENCY_LIMIT"
+                            bridgeCode == "insufficient_resources" ||
+                                bridgeCode == "resource_check_failed" -> "INSUFFICIENT_RESOURCES"
                             bridgeCode == "invalid_lease" || bridgeCode == "lease_expired" ||
                                 response.code == 409 -> "INVALID_LEASE"
                             response.code == 404 &&

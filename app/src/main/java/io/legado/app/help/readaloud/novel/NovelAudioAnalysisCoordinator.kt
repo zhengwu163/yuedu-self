@@ -25,19 +25,23 @@ class NovelAudioAnalysisCoordinator(
         ChapterAnalysisRequest,
         String
     ) -> ChapterAnalysisResponse)? = null,
-    private val leaseId: String? = null
+    private val leaseId: String? = null,
+    /** 0 表示服务端未声明上限，按解析单元整段合成。 */
+    private val maxSegmentChars: Int = 0
 ) {
 
     /** 返回绑定同一 Runtime Lease 的分析器，避免调用方逐请求拼接 header。 */
-    fun withLease(leaseId: String): NovelAudioAnalysisCoordinator {
+    fun withLease(leaseId: String, maxSegmentChars: Int = 0): NovelAudioAnalysisCoordinator {
         require(leaseId.isNotBlank())
+        require(maxSegmentChars >= 0)
         return NovelAudioAnalysisCoordinator(
             analyze = analyze,
             registry = registry,
             voices = voices,
             match = match,
             analyzeWithLease = analyzeWithLease,
-            leaseId = leaseId
+            leaseId = leaseId,
+            maxSegmentChars = maxSegmentChars
         )
     }
 
@@ -132,7 +136,8 @@ class NovelAudioAnalysisCoordinator(
             generation = generation,
             parsedUnits = normalizedUnits,
             speakerIds = speakerIds,
-            voiceBindings = bindings
+            voiceBindings = bindings,
+            maxSegmentChars = maxSegmentChars
         )
     }
 

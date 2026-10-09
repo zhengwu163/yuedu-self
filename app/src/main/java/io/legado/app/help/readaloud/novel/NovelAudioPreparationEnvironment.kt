@@ -59,17 +59,18 @@ internal class NovelAudioPreparationEnvironment private constructor(
             throw error
         }
         return NovelAudioPreparationBatch(
-            environment = withLease(lease.leaseId),
+            environment = withLease(lease.leaseId, lease.maxSegmentChars),
             leaseId = lease.leaseId,
             client = client
         )
     }
 
-    private fun withLease(leaseId: String): NovelAudioPreparationEnvironment {
+    /** 本地服务声明的单段字数上限随租约生效，保证每次合成都落在其单请求预算内。 */
+    private fun withLease(leaseId: String, maxSegmentChars: Int): NovelAudioPreparationEnvironment {
         return NovelAudioPreparationEnvironment(
             serverScope = serverScope,
             characterStore = characterStore,
-            analysis = analysis.withLease(leaseId),
+            analysis = analysis.withLease(leaseId, maxSegmentChars),
             downloadCoordinator = downloadCoordinator.withLease(leaseId),
             client = client
         )

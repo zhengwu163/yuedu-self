@@ -306,6 +306,103 @@ class TextUnitParserTest {
         }
     }
 
+    @Test
+    fun `synthesis split keeps short units and disabled limit whole`() {
+        val snapshot = snapshot(listOf("短句一。短句二。"))
+        val unit = wholeUnit(snapshot)
+        assertEquals(listOf(unit.text to unit.ranges), TextUnitParser.splitForSynthesis(snapshot, unit, 0))
+        assertEquals(listOf(unit.text to unit.ranges), TextUnitParser.splitForSynthesis(snapshot, unit, 6))
+    }
+
+    @Test
+    fun `synthesis split prefers sentence ends and keeps closing quotes`() {
+        val snapshot = snapshot(listOf("“一二三四五。”六七八九十！甲乙丙丁戊。"))
+        val unit = wholeUnit(snapshot)
+        val pieces = TextUnitParser.splitForSynthesis(snapshot, unit, 6)
+        assertEquals(listOf("“一二三四五。”", "六七八九十！", "甲乙丙丁戊。"), pieces.map { it.first })
+        assertPiecesCoverUnit(snapshot, unit, pieces)
+    }
+
+    @Test
+    fun `synthesis split falls back to commas then hard cuts`() {
+        val commas = snapshot(listOf("一二三四五，六七八九十，甲乙"))
+        val commaUnit = wholeUnit(commas)
+        assertEquals(
+            listOf("一二三四五，", "六七八九十，甲乙"),
+            TextUnitParser.splitForSynthesis(commas, commaUnit, 8).map { it.first }
+        )
+
+        val plain = snapshot(listOf("一二三四五六七八九十甲"))
+        val plainUnit = wholeUnit(plain)
+        val pieces = TextUnitParser.splitForSynthesis(plain, plainUnit, 4)
+        assertEquals(listOf("一二三四", "五六七八", "九十甲"), pieces.map { it.first })
+        assertPiecesCoverUnit(plain, plainUnit, pieces)
+    }
+
+    @Test
+    fun `synthesis split never cuts surrogates and every piece is audible`() {
+        val snapshot = snapshot(listOf("😀一二三四五六😀。", "”"))
+        val unit = wholeUnit(snapshot)
+        val pieces = TextUnitParser.splitForSynthesis(snapshot, unit, 3)
+        assertEquals(listOf("😀一二三", "四五六😀。\n”"), pieces.map { it.first })
+        pieces.forEach { (text, _) ->
+            assertFalse(text.first().isLowSurrogate())
+            assertFalse(text.last().isHighSurrogate())
+            assertTrue(text.any { Character.isLetterOrDigit(it) })
+        }
+        assertPiecesCoverUnit(snapshot, unit, pieces)
+    }
+
+    @Test
+    fun `synthesis split leaves units that disagree with the snapshot untouched`() {
+        val snapshot = snapshot(listOf("一二三四五六七八"))
+        val stale = wholeUnit(snapshot).copy(text = "八七六五四三二一")
+        assertEquals(
+            listOf(stale.text to stale.ranges),
+            TextUnitParser.splitForSynthesis(snapshot, stale, 2)
+        )
+    }
+
+    @Test
+    fun `synthesis split ranges replay exactly across paragraphs`() {
+        val random = Random(42)
+        val alphabet = "甲乙丙丁戊己庚辛壬癸。，！？“”😀ab12 \r"
+        repeat(50) {
+            val texts = List(random.nextInt(1, 6)) {
+                buildString {
+                    repeat(random.nextInt(0, 80)) {
+                        val char = alphabet[random.nextInt(alphabet.length)]
+                        // 随机串里拆开的代理对不是合法快照，整体追加 emoji。
+                        if (char.isSurrogate()) append("😀") else append(char)
+                    }
+                }
+            }
+            val snapshot = snapshot(texts)
+            TextUnitParser.parse(snapshot).forEach { unit ->
+                val pieces = TextUnitParser.splitForSynthesis(snapshot, unit, random.nextInt(1, 20))
+                assertPiecesCoverUnit(snapshot, unit, pieces)
+            }
+        }
+    }
+
+    private fun wholeUnit(snapshot: ChapterTextSnapshot): ParsedTextUnit {
+        val text = snapshot.text
+        return ParsedTextUnit(
+            unitId = "u", kind = "narrator", roleType = "narrator", characterName = "旁白",
+            ranges = snapshot.rangesFor(0, text.length), text = text,
+            needsAi = false, confidence = 1.0, reason = "test"
+        )
+    }
+
+    private fun assertPiecesCoverUnit(
+        snapshot: ChapterTextSnapshot,
+        unit: ParsedTextUnit,
+        pieces: List<Pair<String, List<ReadAloudRoleRange>>>
+    ) {
+        assertEquals(unit.text, pieces.joinToString("") { it.first })
+        pieces.forEach { (text, ranges) -> assertEquals(text, snapshot.textFor(ranges)) }
+    }
+
     private fun snapshot(texts: List<String>): ChapterTextSnapshot {
         var start = 0
         return ChapterTextSnapshot(texts.mapIndexed { index, text ->

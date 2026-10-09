@@ -14,7 +14,11 @@ data class ServerHealth(
 @Keep
 data class RuntimeLease(
     val leaseId: String = "",
-    val runtimeProfile: String = ""
+    val runtimeProfile: String = "",
+    /** 服务端声明的单次合成字数上限；0 表示未声明，沿用整段合成。 */
+    val maxSegmentChars: Int = 0,
+    /** 服务跑在用户自己的电脑上；此租约下的请求不计入云端试用额度。 */
+    val selfHosted: Boolean = false
 )
 
 @Keep

@@ -165,6 +165,86 @@ class NovelAudioServerClientTest {
         assertEquals(listOf("lease-1"), leaseHeaders)
     }
 
+    @Test fun `lease carries optional segment limit and self hosted flag`() = runBlocking {
+        payload = """{"leaseId":"lease-1","runtimeProfile":"local-qwen-v1"}"""
+        val cloud = client.acquireRuntime("session-1", "auto_prefetch", 3)
+        assertEquals(0, cloud.maxSegmentChars)
+        assertFalse(cloud.selfHosted)
+
+        payload = """{"leaseId":"lease-2","runtimeProfile":"local-qwen-v1",
+            "maxSegmentChars":50,"selfHosted":true}"""
+        val local = client.acquireRuntime("session-1", "auto_prefetch", 3)
+        assertEquals(50, local.maxSegmentChars)
+        assertTrue(local.selfHosted)
+
+        for (extra in listOf(
+            "\"maxSegmentChars\":\"50\"",
+            "\"maxSegmentChars\":50.5",
+            "\"maxSegmentChars\":0",
+            "\"maxSegmentChars\":1201",
+            "\"selfHosted\":\"true\"",
+            "\"selfHosted\":1"
+        )) {
+            payload = """{"leaseId":"lease-3","runtimeProfile":"local-qwen-v1",$extra}"""
+            expectError("PROTOCOL") { client.acquireRuntime("session-1", "auto_prefetch", 3) }
+        }
+    }
+
+    @Test fun `self hosted lease skips cloud budget only while held`() = runBlocking {
+        val ledger = testLedger(ttsRequests = 1)
+        val budgeted = budgetedClient(ledger)
+        payload = """{"leaseId":"lease-local","runtimeProfile":"local-qwen-v1","selfHosted":true}"""
+        budgeted.acquireRuntime("session-1", "auto_prefetch", 3)
+
+        mime = "audio/ogg"
+        profile = "mock-v1"
+        payload = "OggS-test-fixture"
+        // 超过云端额度上限的次数也能生成：家庭电脑不消耗云端额度。
+        repeat(3) { budgeted.synthesize(SynthesisRequest("原文", "M017"), "lease-local") }
+        budgeted.preview(SynthesisRequest("试听", "M017"), "lease-local")
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+        assertEquals(0, ledger.snapshot().ttsUtf16Characters)
+
+        // 无租约请求仍计额度。
+        budgeted.synthesize(SynthesisRequest("原文", "M017"))
+        assertEquals(1, ledger.snapshot().ttsVendorRequests)
+
+        mime = "application/json"
+        payload = """{"state":"idle"}"""
+        budgeted.releaseRuntime("lease-local")
+        mime = "audio/ogg"
+        payload = "OggS-test-fixture"
+        // 释放后同一 ID 不再享受豁免，额度已满即在发请求前拒绝。
+        val sent = requests.size
+        expectError("LOCAL_BUDGET_EXHAUSTED") {
+            budgeted.synthesize(SynthesisRequest("原文", "M017"), "lease-local")
+        }
+        assertEquals(sent, requests.size)
+    }
+
+    @Test fun `ordinary lease still consumes cloud budget`() = runBlocking {
+        val ledger = testLedger()
+        val budgeted = budgetedClient(ledger)
+        payload = """{"leaseId":"lease-cloud","runtimeProfile":"cloud-v1"}"""
+        budgeted.acquireRuntime("session-1", "auto_prefetch", 3)
+        mime = "audio/ogg"
+        profile = "mock-v1"
+        payload = "OggS-test-fixture"
+        budgeted.synthesize(SynthesisRequest("原文", "M017"), "lease-cloud")
+        assertEquals(1, ledger.snapshot().ttsVendorRequests)
+    }
+
+    @Test fun `home pc resource shortage maps to a non transient kind`() = runBlocking {
+        status = 503
+        for (code in listOf("insufficient_resources", "resource_check_failed")) {
+            payload = """{"error":{"code":"$code"}}"""
+            val error = expectError("INSUFFICIENT_RESOURCES") {
+                client.acquireRuntime("session-1", "auto_prefetch", 3)
+            }
+            assertTrue(error.message!!.contains("显卡"))
+        }
+    }
+
     @Test fun `invalid lease header does not consume generation budget`() = runBlocking {
         val ledger = testLedger()
         val budgeted = budgetedClient(ledger)

@@ -212,6 +212,9 @@ class HttpServerTest(unittest.TestCase):
             ["chapter-analysis", "speech-synthesis", "voice-design"],
             status_payload["runtimeProfileInfo"]["capabilities"],
         )
+        # Phones split chapter text by this limit; it must be advertised on
+        # both status and acquire so either entry point can configure it.
+        self.assertEqual(50, status_payload["maxSegmentChars"])
         status, _, raw = self.request(
             "POST",
             "/v1/runtime/acquire",
@@ -228,6 +231,9 @@ class HttpServerTest(unittest.TestCase):
             "fake-local-v1",
             acquire_payload["runtimeProfileInfo"]["identity"],
         )
+        self.assertEqual(50, acquire_payload["maxSegmentChars"])
+        # Phones skip the metered cloud budget only for self-hosted leases.
+        self.assertIs(True, acquire_payload["selfHosted"])
         lease_headers = {"X-NovelAudio-Lease": lease_id}
         self.assertEqual(
             200,
@@ -421,6 +427,24 @@ class HttpServerTest(unittest.TestCase):
             404,
             self.request("GET", "/v1/runtime/status?secret=hidden")[0],
         )
+
+
+class SegmentLimitTest(unittest.TestCase):
+    def api(self, backend):
+        api = NovelAudioApi.__new__(NovelAudioApi)
+        api.backend = backend
+        return api
+
+    def test_backend_may_override_but_not_corrupt_the_segment_limit(self):
+        from scripts.novel_audio_server.errors import InvalidBackendResponseError
+
+        self.assertEqual(50, self.api(SimpleNamespace())._max_segment_chars())
+        self.assertEqual(
+            80, self.api(SimpleNamespace(max_segment_chars=80))._max_segment_chars()
+        )
+        for value in (0, 1201, True, "50", 5.0):
+            with self.subTest(value=value), self.assertRaises(InvalidBackendResponseError):
+                self.api(SimpleNamespace(max_segment_chars=value))._max_segment_chars()
 
 
 if __name__ == "__main__":

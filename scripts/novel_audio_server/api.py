@@ -23,6 +23,12 @@ from .protocol import (
     synthesis_request,
 )
 
+# synthesis_request() accepts up to 1200 characters per request.
+MAX_TEXT_LENGTH = 1200
+# Measured on the 7B Windows host: about 50 Han characters per request keeps a
+# warm segment near 20 s and a cold one under 30 s.
+DEFAULT_MAX_SEGMENT_CHARS = 50
+
 
 class RequestContext:
     """One HTTP request owns cancellation until its response is published."""
@@ -291,6 +297,7 @@ class NovelAudioApi:
                         "local-runtime-v1",
                     ),
                     "runtimeProfileInfo": metadata,
+                    "maxSegmentChars": self._max_segment_chars(),
                 }
 
             if method != "POST":
@@ -325,6 +332,10 @@ class NovelAudioApi:
                         "local-runtime-v1",
                     ),
                     "runtimeProfileInfo": metadata,
+                    "maxSegmentChars": self._max_segment_chars(),
+                    # Generation runs on the user's own hardware; phones exempt
+                    # requests under this lease from the metered cloud budget.
+                    "selfHosted": True,
                 }
 
             if path == "/v1/runtime/release":
@@ -421,6 +432,18 @@ class NovelAudioApi:
             if callable(cancel):
                 cancel(lease_id)
         raise InvalidBackendResponseError()
+
+    def _max_segment_chars(self):
+        # Local TTS is slower than real time; a 50-character segment keeps
+        # one synthesize request well inside the phone's per-request budget.
+        value = getattr(self.backend, "max_segment_chars", DEFAULT_MAX_SEGMENT_CHARS)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 1 <= value <= MAX_TEXT_LENGTH
+        ):
+            raise InvalidBackendResponseError()
+        return value
 
     def _runtime_metadata(self):
         metadata = getattr(self.backend, "runtime_metadata", None)
