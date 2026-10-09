@@ -80,6 +80,29 @@ class HttpTest(unittest.TestCase):
         self.assertRegex(output.getvalue(), r"^POST /v1/chapter/analyze 502 \d+ms invalid_cloud_response\n$")
         self.assertNotIn("local", output.getvalue())
 
+    def test_invalid_model_analysis_reports_failure_category(self):
+        # 模型输出不合规时只返回类别码，供真机定位；不得回显角色名或正文。
+        cases = (
+            ({"assignments": [{"unitId": "u1", "speakerId": "narrator"}],
+              "newCharacters": [], "aliasUpdates": []}, "analysis_unit_coverage"),
+            ({"assignments": [{"unitId": "u1", "speakerId": "narrator"},
+                              {"unitId": "u2", "speakerId": "苏禾"}],
+              "newCharacters": [], "aliasUpdates": []}, "analysis_unknown_speaker"),
+            ({"assignments": [], "newCharacters": [{"temporaryId": "t1", "displayName": "苏禾"}],
+              "aliasUpdates": []}, "analysis_invalid_character"),
+            ({"assignments": [{"unitId": "u1", "speakerId": "narrator"},
+                              {"unitId": "u2", "speakerId": "char_1"}],
+              "newCharacters": [], "aliasUpdates": [{"characterId": "narrator"}]},
+             "analysis_invalid_alias"),
+        )
+        for answer, code in cases:
+            with self.subTest(code=code), patch.object(self.cloud, "analyze", return_value=answer), \
+                    contextlib.redirect_stderr(io.StringIO()) as output:
+                status, _, body = self.request("/v1/chapter/analyze", analysis())
+                self.assertEqual(502, status)
+                self.assertEqual({"error": {"code": code}}, json.loads(body))
+                self.assertNotIn("苏禾", output.getvalue())
+
     def test_rejects_malformed_json_and_utf8(self):
         for raw in (b"\xff", b'{"units":[],"units":[]}', b'{"speed":NaN}',
                     b'{"text":"\\ud800"}'):
@@ -256,6 +279,28 @@ class WorkerTest(unittest.TestCase):
                 stdout = io.TextIOWrapper(io.BytesIO())
                 stderr = io.StringIO()
                 with stdin, stdout, patch.object(worker_module.sys, "argv", ["worker", "synthesize"]), \
+                        patch.object(worker_module.sys, "stdin", stdin), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
+                        patch.object(worker_module, "BailianClient", return_value=client):
+                    exit_code = worker_module.main()
+                    stdout.flush()
+                    self.assertEqual(b"", stdout.buffer.getvalue())
+                self.assertEqual("", stderr.getvalue())
+                with self.assertRaises(BridgeError) as caught:
+                    run_bounded_process([sys.executable, "-c", f"raise SystemExit({exit_code})"], b"", 3)
+                self.assertEqual(expected, caught.exception.code)
+
+    def test_analysis_codes_roundtrip_through_worker_exit_only(self):
+        cases = (({"finish_reason": "length", "message": {"content": "{}"}}, "analysis_truncated"),
+                 ({"finish_reason": "stop", "message": {"content": "secret"}}, "analysis_invalid_json"))
+        for choice, expected in cases:
+            with self.subTest(expected=expected):
+                client, _ = test_cloud.CloudTest().client([response({"choices": [choice]})])
+                payload = json.dumps({"key": "fake-key", "ffmpeg": "ffmpeg", "request": analysis()})
+                stdin = io.TextIOWrapper(io.BytesIO(payload.encode()))
+                stdout = io.TextIOWrapper(io.BytesIO())
+                stderr = io.StringIO()
+                with stdin, stdout, patch.object(worker_module.sys, "argv", ["worker", "analyze"]), \
                         patch.object(worker_module.sys, "stdin", stdin), \
                         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
                         patch.object(worker_module, "BailianClient", return_value=client):

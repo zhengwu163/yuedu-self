@@ -299,7 +299,7 @@ class BridgeApiTest(unittest.TestCase):
             },
         )
         self.assertEqual(502, code)
-        self.assertEqual("invalid_cloud_response", body["error"]["code"])
+        self.assertEqual("analysis_unit_coverage", body["error"]["code"])
 
     def test_tts_returns_audio_and_profile(self):
         code, headers, body = self.call(

@@ -13,6 +13,7 @@ from protocol import (
     CloudTimeoutError, MAX_AUDIO, MAX_JSON, TEXT_MODEL, TTS_MODEL, strict_json_loads,
     parse_analysis_json, parse_tts_audio_url, require, analysis_request,
     TtsResponseError, TtsJsonError, TtsDownloadError, TtsWavError, TtsConversionError,
+    AnalysisJsonError, AnalysisTruncatedError,
 )
 
 TEXT_ENDPOINT = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
@@ -186,10 +187,16 @@ class BailianClient:
         value = self._json(TEXT_ENDPOINT, payload, deadline)
         try:
             choice = value["choices"][0]
-            require(choice["finish_reason"] == "stop")
-            return parse_analysis_json(choice["message"]["content"])
-        except (KeyError, TypeError, ValueError, IndexError):
+            content = choice["message"]["content"]
+            finished = choice["finish_reason"] == "stop"
+        except (KeyError, TypeError, IndexError):
             raise CloudProtocolError() from None
+        if not finished:
+            raise AnalysisTruncatedError()
+        try:
+            return parse_analysis_json(content)
+        except (TypeError, ValueError):
+            raise AnalysisJsonError() from None
 
     def synthesize(self, request):
         deadline = time.monotonic() + 25

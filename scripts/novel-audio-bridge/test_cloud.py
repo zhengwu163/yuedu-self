@@ -89,6 +89,18 @@ class CloudTest(unittest.TestCase):
         client.analyze(analysis())
         self.assertGreater(transport.requests[0][1], 30)
 
+    def test_analysis_output_failures_have_distinct_codes(self):
+        cases = (({"finish_reason": "length", "message": {"content": "{}"}}, "analysis_truncated"),
+                 ({"finish_reason": "stop", "message": {"content": "不是 JSON"}}, "analysis_invalid_json"),
+                 ({"finish_reason": "stop", "message": {"content": "{\"assignments\": 1}"}},
+                  "analysis_invalid_json"))
+        for choice, code in cases:
+            with self.subTest(code=code):
+                client, _ = self.client([response({"choices": [choice]})])
+                with self.assertRaises(CloudProtocolError) as raised:
+                    client.analyze(analysis())
+                self.assertEqual(code, raised.exception.code)
+
     def test_truncated_model_output_rejected(self):
         client, _ = self.client([response({"choices": [
             {"finish_reason": "length", "message": {"content": "{}"}}]})])

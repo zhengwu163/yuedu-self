@@ -14,14 +14,14 @@ from protocol import (
     BridgeError, CloudAuthError, CloudProtocolError, CloudQuotaError, CloudRateError,
     CloudTimeoutError, MAX_AUDIO, MAX_JSON, strict_json_loads,
     TtsResponseError, TtsJsonError, TtsMissingAudioUrlError, TtsUnsafeAudioUrlError,
-    TtsDownloadError, TtsWavError, TtsConversionError,
+    TtsDownloadError, TtsWavError, TtsConversionError, AnalysisTruncatedError, AnalysisJsonError,
 )
 
 ERRORS = {20: CloudAuthError, 21: CloudQuotaError, 22: CloudRateError,
           23: CloudProtocolError, 24: CloudTimeoutError, 25: BridgeError,
           26: TtsResponseError, 27: TtsJsonError, 28: TtsMissingAudioUrlError,
           29: TtsUnsafeAudioUrlError, 30: TtsDownloadError, 31: TtsWavError,
-          32: TtsConversionError}
+          32: TtsConversionError, 33: AnalysisTruncatedError, 34: AnalysisJsonError}
 
 
 def terminate(process):

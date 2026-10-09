@@ -74,6 +74,31 @@ class TtsConversionError(CloudProtocolError):
     code = "tts_conversion_failed"
 
 
+# 章节分析同样只回传失败类别，便于真机定位模型输出问题而不暴露正文。
+class AnalysisTruncatedError(CloudProtocolError):
+    code = "analysis_truncated"
+
+
+class AnalysisJsonError(CloudProtocolError):
+    code = "analysis_invalid_json"
+
+
+class AnalysisCharacterError(CloudProtocolError):
+    code = "analysis_invalid_character"
+
+
+class AnalysisUnitCoverageError(CloudProtocolError):
+    code = "analysis_unit_coverage"
+
+
+class AnalysisUnknownSpeakerError(CloudProtocolError):
+    code = "analysis_unknown_speaker"
+
+
+class AnalysisAliasError(CloudProtocolError):
+    code = "analysis_invalid_alias"
+
+
 class CloudTimeoutError(BridgeError):
     status, code = 504, "cloud_timeout"
 
@@ -195,37 +220,52 @@ def analysis_request(body):
 
 
 def analysis_response(value, request):
-    record(value)
+    try:
+        record(value)
+    except ValueError:
+        raise AnalysisJsonError() from None
     known = {c["characterId"] for c in request["characters"]}
     all_ids = known | {"narrator"}
     created = []
-    for item in array(value.get("newCharacters"), 64):
-        record(item)
-        key = string(item.get("temporaryId"))
-        require(key not in all_ids)
-        all_ids.add(key)
-        created.append({
-            "temporaryId": key, "displayName": string(item.get("displayName")),
-            "gender": string(item.get("gender")), "ageRange": string(item.get("ageRange")),
-            "voicePersona": {"traits": strings(record(item.get("voicePersona")).get("traits"))},
-        })
+    try:
+        for item in array(value.get("newCharacters"), 64):
+            record(item)
+            key = string(item.get("temporaryId"))
+            require(key not in all_ids)
+            all_ids.add(key)
+            created.append({
+                "temporaryId": key, "displayName": string(item.get("displayName")),
+                "gender": string(item.get("gender")), "ageRange": string(item.get("ageRange")),
+                "voicePersona": {"traits": strings(record(item.get("voicePersona")).get("traits"))},
+            })
+    except (ValueError, TypeError):
+        raise AnalysisCharacterError() from None
     unit_ids = {u["unitId"] for u in request["units"]}
     assignments, seen = [], set()
-    for item in array(value.get("assignments"), 64):
-        record(item)
-        unit, speaker = string(item.get("unitId")), string(item.get("speakerId"))
-        require(unit in unit_ids and unit not in seen and speaker in all_ids)
-        seen.add(unit)
-        assignments.append({"unitId": unit, "speakerId": speaker})
-    require(seen == unit_ids)
+    try:
+        items = array(value.get("assignments"), 64)
+        for item in items:
+            record(item)
+            unit, speaker = string(item.get("unitId")), string(item.get("speakerId"))
+            if speaker not in all_ids:
+                raise AnalysisUnknownSpeakerError()
+            require(unit in unit_ids and unit not in seen)
+            seen.add(unit)
+            assignments.append({"unitId": unit, "speakerId": speaker})
+        require(seen == unit_ids)
+    except (ValueError, TypeError):
+        raise AnalysisUnitCoverageError() from None
     aliases, updated = [], set()
-    for item in array(value.get("aliasUpdates"), 64):
-        record(item)
-        key = string(item.get("characterId"))
-        require(key != "narrator" and key in all_ids and key not in updated)
-        updated.add(key)
-        stable = [v for v in strings(item.get("stableAliases")) if v.strip() not in CONTEXTUAL]
-        aliases.append({"characterId": key, "stableAliases": stable})
+    try:
+        for item in array(value.get("aliasUpdates"), 64):
+            record(item)
+            key = string(item.get("characterId"))
+            require(key != "narrator" and key in all_ids and key not in updated)
+            updated.add(key)
+            stable = [v for v in strings(item.get("stableAliases")) if v.strip() not in CONTEXTUAL]
+            aliases.append({"characterId": key, "stableAliases": stable})
+    except (ValueError, TypeError):
+        raise AnalysisAliasError() from None
     return {"assignments": assignments, "newCharacters": created, "aliasUpdates": aliases}
 
 
