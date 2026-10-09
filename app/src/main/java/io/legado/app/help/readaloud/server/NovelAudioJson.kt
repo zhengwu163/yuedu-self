@@ -16,7 +16,14 @@ internal object NovelAudioJson {
         val status = root.text("status")
         val version = root.text("apiVersion")
         require(status == "ok" && version == "1")
-        ServerHealth(status, version, root.bool("directorReady"), root.bool("ttsReady"))
+        val metered = if (root.has("meteredOperations")) {
+            root.strings("meteredOperations").also {
+                require(it.all(ALL_METERED_OPERATIONS::contains) && it.distinct().size == it.size)
+            }
+        } else {
+            ALL_METERED_OPERATIONS
+        }
+        ServerHealth(status, version, root.bool("directorReady"), root.bool("ttsReady"), metered)
     }
 
     fun voices(json: String, key: String): List<VoiceAsset> = decode(json) { root ->

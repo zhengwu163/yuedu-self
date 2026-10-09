@@ -80,6 +80,29 @@ class GatewayTest(unittest.TestCase):
         self.assertTrue(body["ttsReady"])
         self.assertFalse(body["directorReady"])
 
+    def test_health_declares_only_metered_operations(self):
+        # Android 只对声明计费的操作扣设备试用额度；未声明计费属性的提供方按计费处理。
+        class LocalSpeech(FakeSpeech):
+            metered = False
+
+        class CloudDirector(FakeDirector):
+            metered = True
+
+        cases = (
+            (LocalSpeech(), CloudDirector(), ["analysis"]),
+            (LocalSpeech(), FakeDirector(), ["analysis"]),
+            (FakeSpeech(), CloudDirector(), ["analysis", "tts"]),
+        )
+        for speech, director, expected in cases:
+            with self.subTest(expected=expected):
+                gateway = NovelAudioGateway(
+                    speech=speech, director=director, token="local-token",
+                )
+                _, _, body = gateway.respond(
+                    "GET", "/v1/health", "Bearer local-token", None,
+                )
+                self.assertEqual(expected, body["meteredOperations"])
+
     def test_all_routes_require_bearer_auth(self):
         for route in (
             "/v1/health",

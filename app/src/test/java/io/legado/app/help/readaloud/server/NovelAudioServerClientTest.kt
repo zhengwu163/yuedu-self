@@ -25,6 +25,8 @@ class NovelAudioServerClientTest {
     private var status = 200
     private var mime = "application/json"
     private var payload = """{"status":"ok","apiVersion":"1","directorReady":true,"ttsReady":true}"""
+    // 非空时 /v1/health 单独返回该响应，用于计费探测与生成端点共存的场景。
+    private var healthPayload: String? = null
     private var profile: String? = null
     private var retryAfter: String? = null
     private var rawPayload: ByteArray? = null
@@ -38,12 +40,15 @@ class NovelAudioServerClientTest {
                 session.parseBody(files)
                 requests += Triple(session.uri, session.headers["authorization"], files["postData"].orEmpty())
                 beforeResponse()
-                val bytes = rawPayload ?: payload.toByteArray(Charsets.UTF_8)
+                val health = healthPayload?.takeIf { session.uri.endsWith("/v1/health") }
+                val bytes = health?.toByteArray(Charsets.UTF_8)
+                    ?: rawPayload ?: payload.toByteArray(Charsets.UTF_8)
+                val responseMime = if (health != null) "application/json" else mime
                 val response = if (chunked) {
-                    newChunkedResponse(Response.Status.lookup(status), mime, bytes.inputStream())
+                    newChunkedResponse(Response.Status.lookup(status), responseMime, bytes.inputStream())
                 } else {
                     newFixedLengthResponse(
-                        Response.Status.lookup(status), mime, bytes.inputStream(), bytes.size.toLong()
+                        Response.Status.lookup(status), responseMime, bytes.inputStream(), bytes.size.toLong()
                     )
                 }
                 return response.apply {
@@ -78,6 +83,74 @@ class NovelAudioServerClientTest {
     @Test fun `unready health stays unready`() = runBlocking {
         payload = payload.replace("\"ttsReady\":true", "\"ttsReady\":false")
         assertFalse(client.health().ttsReady)
+    }
+
+    @Test fun `health metered operations default to all and reject unknown values`() = runBlocking {
+        assertEquals(listOf("analysis", "tts"), client.health().meteredOperations)
+        val base = payload.removeSuffix("}")
+        payload = """$base,"meteredOperations":["analysis"]}"""
+        assertEquals(listOf("analysis"), client.health().meteredOperations)
+        payload = """$base,"meteredOperations":[]}"""
+        assertEquals(emptyList<String>(), client.health().meteredOperations)
+        for (value in listOf("""["gpu"]""", "\"tts\"", "[1]", """["tts","tts"]""", "null")) {
+            payload = """$base,"meteredOperations":$value}"""
+            expectError("PROTOCOL") { client.health() }
+        }
+    }
+
+    @Test fun `operations the server declares unmetered skip the local trial budget`() = runBlocking {
+        // 真机复现：本地 VoiceStudio 合成被百炼试用期的设备账本拦截，未发出任何请求。
+        val ledger = testLedger()
+        ledger.blockLocalBudget()
+        val probing = NovelAudioServerClient(
+            "http://127.0.0.1:${server.listeningPort}/prefix",
+            { "test-secret" },
+            budgetLedger = ledger,
+            probeMetering = true
+        )
+        healthPayload = """{"status":"ok","apiVersion":"1","directorReady":true,"ttsReady":true,""" +
+            """"meteredOperations":["analysis"]}"""
+        mime = "audio/ogg"
+        profile = "local-v1"
+        payload = "OggS-test-fixture"
+
+        assertEquals("local-v1", probing.synthesize(SynthesisRequest("原文", "M017")).ttsProfile)
+        probing.preview(SynthesisRequest("试听", "M017"))
+        expectError("LOCAL_BUDGET_EXHAUSTED") { probing.analyze(request()) }
+
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+        assertEquals(1, requests.count { it.first.endsWith("/v1/health") })
+        assertTrue(requests.none { it.first.endsWith("/v1/chapter/analyze") })
+    }
+
+    @Test fun `failed metering probe keeps the local trial budget enforced`() = runBlocking {
+        val ledger = testLedger()
+        ledger.blockLocalBudget()
+        val probing = NovelAudioServerClient(
+            "http://127.0.0.1:${server.listeningPort}/prefix",
+            { "test-secret" },
+            budgetLedger = ledger,
+            probeMetering = true
+        )
+        healthPayload = "{broken"
+        expectError("LOCAL_BUDGET_EXHAUSTED") {
+            probing.synthesize(SynthesisRequest("原文", "M017"))
+        }
+        assertTrue(requests.none { it.first.endsWith("/v1/tts/synthesize") })
+    }
+
+    @Test fun `generation clients from saved credentials honour server metering`() = runBlocking {
+        val ledger = testLedger()
+        ledger.blockLocalBudget()
+        val generation = NovelAudioServerCredentials.create(
+            "http://127.0.0.1:${server.listeningPort}", "test-secret", allowInsecureHttp = true
+        ).newClient(ledger)
+        healthPayload = """{"status":"ok","apiVersion":"1","directorReady":true,"ttsReady":true,""" +
+            """"meteredOperations":[]}"""
+        mime = "audio/ogg"
+        profile = "local-v1"
+        payload = "OggS-test-fixture"
+        assertEquals("local-v1", generation.synthesize(SynthesisRequest("原文", "M017")).ttsProfile)
     }
 
     @Test fun `saved snapshots never mix new tokens with old server addresses`() = runBlocking {

@@ -76,6 +76,24 @@ class RequestTimeoutConfigTest(unittest.TestCase):
         self.assertEqual(30, gateway.request_timeout)
         self.assertEqual(30, gateway.speech.config.request_timeout)
 
+    def test_local_voicestudio_tts_is_not_metered_but_remote_director_is(self):
+        registry = VoiceRegistry.from_records([{
+            "voiceAssetId": "voice", "displayName": "旁白",
+            "gender": "unknown", "ageRange": "adult", "traits": [],
+            "providerRef": "profile",
+        }], profile_revision="revision")
+        cases = (
+            ({}, []),
+            ({"DIRECTOR_BASE_URL": "http://127.0.0.1:9", "DIRECTOR_TOKEN": "d"},
+             ["analysis"]),
+        )
+        for extra, expected in cases:
+            with self.subTest(expected=expected):
+                config = load_config(dict(self.BASE, **extra))
+                with patch.object(server, "_load_registry", return_value=registry):
+                    gateway = server.build_gateway(config)
+                self.assertEqual(expected, gateway._health()[2]["meteredOperations"])
+
 
 class ServerConfigTest(unittest.TestCase):
     def test_discovery_failure_does_not_reuse_or_overwrite_old_registry(self):

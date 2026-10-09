@@ -37,6 +37,9 @@ class VoiceStudioConfig:
 
 
 class VoiceStudioSpeechProvider:
+    # 本地或自建 VoiceStudio 合成不消耗云额度，Android 不应扣设备试用额度。
+    metered = False
+
     def __init__(
         self,
         base_url,

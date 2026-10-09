@@ -36,6 +36,13 @@ def request():
 
 
 class DirectorProviderTest(unittest.TestCase):
+    def test_external_director_is_declared_metered(self):
+        # 外部分析服务（如百炼桥接）可能消耗云额度，Android 必须继续扣设备试用额度。
+        from director import ConfiguredDirectorProvider
+
+        self.assertTrue(HttpDirectorProvider("http://127.0.0.1:9", "token").metered)
+        self.assertFalse(ConfiguredDirectorProvider().metered)
+
     def test_health_checks_upstream_readiness_and_protocol(self):
         for status, body, ready in (
             (200, {"status": "ok", "apiVersion": "1", "directorReady": True}, True),

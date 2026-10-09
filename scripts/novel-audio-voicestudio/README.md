@@ -92,6 +92,11 @@ POST /v1/voices/preview
 POST /v1/tts/synthesize
 ```
 
+`/v1/health` 额外返回 `meteredOperations`，列出会产生外部计费的操作。Android
+只对列出的操作扣设备端试用额度：本地 VoiceStudio 合成不计费；配置了外部
+Director（如百炼桥接）时 `analysis` 计费。旧服务不返回该字段时，Android 按全部
+计费处理。
+
 ## 本机 VoiceStudio（已验证 0.5.6）
 
 上游为开源项目 `debpalash/VoiceStudio`（AGPL-3.0，默认引擎 OmniVoice，

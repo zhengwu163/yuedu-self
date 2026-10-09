@@ -6,6 +6,9 @@ from protocol import project_analysis
 class ConfiguredDirectorProvider:
     """保留章节分析的服务边界，不把具体 LLM 绑定进 TTS Provider。"""
 
+    # 进程内分析不产生外部计费。
+    metered = False
+
     def __init__(self, analyze=None):
         self._analyze = analyze
 

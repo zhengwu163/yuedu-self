@@ -52,9 +52,12 @@ class NovelAudioServerClient(
     baseUrl: String,
     private val tokenProvider: () -> String,
     private val timeoutLimitMillis: Long = 45_000,
-    private val budgetLedger: NovelAudioBudgetLedger? = null
+    private val budgetLedger: NovelAudioBudgetLedger? = null,
+    // 为 true 时先读 /v1/health 的 meteredOperations，只对计费操作扣本地试用额度。
+    private val probeMetering: Boolean = false
 ) {
     private val base = NovelAudioServerCredentials.parseBaseUrl(baseUrl)
+    @Volatile private var meteredOperations: List<String>? = null
 
     init {
         if (timeoutLimitMillis !in 1..45_000) throw NovelAudioServerException("CONFIG")
@@ -76,15 +79,15 @@ class NovelAudioServerClient(
         // 先做纯本地校验：非法凭据或超限负载不得消耗不可退款的本地额度。
         val body = encodePayload(request)
         peekToken()
-        val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
-        val reservation = ledger.reserve(
-            kind = NovelAudioBudgetLedger.Kind.ANALYSIS,
+        val reservation = reserveIfMetered(
+            METERED_ANALYSIS,
+            NovelAudioBudgetLedger.Kind.ANALYSIS,
             utf16Characters = request.units.sumOf { it.text.length }
         )
         try {
             NovelAudioJson.analysis(json("chapter/analyze", body, 45_000), request)
         } finally {
-            reservation.close()
+            reservation?.close()
         }
     }
 
@@ -107,9 +110,9 @@ class NovelAudioServerClient(
             // 先做纯本地校验：非法凭据或超限负载不得消耗不可退款的本地额度。
             val body = encodePayload(request)
             peekToken()
-            val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
-            val reservation = ledger.reserve(
-                kind = NovelAudioBudgetLedger.Kind.TTS,
+            val reservation = reserveIfMetered(
+                METERED_TTS,
+                NovelAudioBudgetLedger.Kind.TTS,
                 utf16Characters = request.text.length,
                 // 桥接按 Unicode code point 每 600 拆一次供应商请求，不能用 UTF-16 长度。
                 vendorRequests = (request.text.codePointCount(0, request.text.length) + 599) / 600
@@ -118,9 +121,34 @@ class NovelAudioServerClient(
                 val result = exchange(path, body, 30_000, true)
                 SynthesizedAudio(result.bytes, result.type, result.profile)
             } finally {
-                reservation.close()
+                reservation?.close()
             }
         }
+
+    /**
+     * 计费操作在真实请求前预占本地额度；服务端明确声明不计费的操作（如本地模型合成）跳过账本。
+     * 探测失败或未开启探测时一律按计费处理，保持 fail closed。
+     */
+    private suspend fun reserveIfMetered(
+        operation: String,
+        kind: NovelAudioBudgetLedger.Kind,
+        utf16Characters: Int,
+        vendorRequests: Int = 1
+    ): NovelAudioBudgetLedger.Reservation? {
+        if (!isMetered(operation)) return null
+        val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
+        return ledger.reserve(kind, utf16Characters, vendorRequests)
+    }
+
+    private suspend fun isMetered(operation: String): Boolean {
+        if (!probeMetering) return true
+        val known = meteredOperations ?: try {
+            health().meteredOperations.also { meteredOperations = it }
+        } catch (_: NovelAudioServerException) {
+            return true
+        }
+        return operation in known
+    }
 
     /** 序列化并在预占之前执行请求体上限校验。 */
     private fun encodePayload(payload: Any?): ByteArray? {

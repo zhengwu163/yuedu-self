@@ -90,6 +90,13 @@ class NovelAudioGateway:
             "apiVersion": "1",
             "directorReady": director,
             "ttsReady": speech,
+            # Android 只对这里列出的操作扣设备试用额度；未声明的提供方按计费处理。
+            "meteredOperations": [
+                name for name, provider in (
+                    ("analysis", self.director), ("tts", self.speech),
+                )
+                if getattr(provider, "metered", True)
+            ],
         }
 
     def _voices(self):

@@ -17,6 +17,9 @@ from protocol import MAX_JSON, project_analysis, strict_json_loads
 
 
 class HttpDirectorProvider:
+    # 外部分析服务（如百炼桥接）可能消耗云额度，向 Android 声明为计费操作。
+    metered = True
+
     def __init__(
         self,
         base_url,

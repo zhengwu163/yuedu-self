@@ -18,7 +18,8 @@ internal class NovelAudioServerCredentials private constructor(val baseUrl: Stri
             baseUrl = baseUrl,
             tokenProvider = { token },
             timeoutLimitMillis = 45_000,
-            budgetLedger = budgetLedger
+            budgetLedger = budgetLedger,
+            probeMetering = true
         )
 
     // 禁止 data class 自动生成包含地址/令牌的 toString。

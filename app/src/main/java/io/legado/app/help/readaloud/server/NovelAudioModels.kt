@@ -8,8 +8,14 @@ data class ServerHealth(
     val status: String = "",
     val apiVersion: String = "",
     val directorReady: Boolean = false,
-    val ttsReady: Boolean = false
+    val ttsReady: Boolean = false,
+    // 服务端声明会产生计费的操作；旧服务不声明时按全部计费处理。
+    val meteredOperations: List<String> = ALL_METERED_OPERATIONS
 )
+
+const val METERED_ANALYSIS = "analysis"
+const val METERED_TTS = "tts"
+val ALL_METERED_OPERATIONS = listOf(METERED_ANALYSIS, METERED_TTS)
 
 @Keep
 data class AnalysisUnit(val unitId: String = "", val text: String = "")
