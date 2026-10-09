@@ -134,8 +134,9 @@ class BailianClient:
     def _request(self, request, limit, deadline):
         try:
             # 错误体的下载同样可能超时/截断，必须处于外层统一归一化边界内。
+            # 单次阻塞读取以剩余总时限为界：非流式整章分析的首字节常晚于 10 秒。
             try:
-                with self.opener.open(request, timeout=min(10, self._remaining(deadline))) as response:
+                with self.opener.open(request, timeout=self._remaining(deadline)) as response:
                     data = self._read(response, limit, deadline)
                     if response.status != 200:
                         raise self._cloud_error(response.status, data)

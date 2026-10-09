@@ -81,6 +81,14 @@ class CloudTest(unittest.TestCase):
         self.assertEqual("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
                          request.full_url)
 
+    def test_text_request_waits_for_whole_deadline_not_ten_second_socket_cap(self):
+        # 真机实测：非流式整章分析首字节常超过 10 秒；单次读取上限必须是剩余总时限。
+        answer = {"assignments": [], "newCharacters": [], "aliasUpdates": []}
+        client, transport = self.client([response({"choices": [
+            {"finish_reason": "stop", "message": {"content": json.dumps(answer)}}]})])
+        client.analyze(analysis())
+        self.assertGreater(transport.requests[0][1], 30)
+
     def test_truncated_model_output_rejected(self):
         client, _ = self.client([response({"choices": [
             {"finish_reason": "length", "message": {"content": "{}"}}]})])
