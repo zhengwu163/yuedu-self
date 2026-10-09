@@ -222,6 +222,27 @@ class NovelAudioServerClientTest {
         assertEquals(sent, requests.size)
     }
 
+    @Test fun `self hosted lease keeps single flight generation`() = runBlocking {
+        val ledger = testLedger()
+        val budgeted = budgetedClient(ledger)
+        payload = """{"leaseId":"lease-local","runtimeProfile":"local-qwen-v1","selfHosted":true}"""
+        budgeted.acquireRuntime("session-1", "auto_prefetch", 3)
+        mime = "audio/ogg"
+        profile = "mock-v1"
+        payload = "OggS-test-fixture"
+        val sent = requests.size
+        // 另一路生成占着许可时，家庭电脑请求也必须在发出前被拒，避免服务端 busy。
+        ledger.acquireSlot().use {
+            expectError("CONCURRENCY_LIMIT") {
+                budgeted.synthesize(SynthesisRequest("原文", "M017"), "lease-local")
+            }
+        }
+        assertEquals(sent, requests.size)
+        budgeted.synthesize(SynthesisRequest("原文", "M017"), "lease-local")
+        assertEquals(sent + 1, requests.size)
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+    }
+
     @Test fun `ordinary lease still consumes cloud budget`() = runBlocking {
         val ledger = testLedger()
         val budgeted = budgetedClient(ledger)

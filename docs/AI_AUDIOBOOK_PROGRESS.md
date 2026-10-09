@@ -2,6 +2,13 @@
 
 ## 总体状态
 
+### Windows agent 全面接管（2026-10-09）
+
+后续开发与调试全部由 Windows agent 负责，当前进度、待办和红线见
+[AI_AUDIOBOOK_WINDOWS_TAKEOVER.md](AI_AUDIOBOOK_WINDOWS_TAKEOVER.md)。
+本日完成手机端接入本地服务：按服务端 50 字上限分段、自托管租约免云端额度（保留单飞）、
+合成超时 60 秒、显卡/内存不足提示；Mac 上单测与构建通过，尚未真机运行。
+
 ### Android 真机百炼整章验收（2026-10-08）
 
 - 已在授权设备 `cc82fcd9` 安装并启动 `io.legado.miss.app.debug`，

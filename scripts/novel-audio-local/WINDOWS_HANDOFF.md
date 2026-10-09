@@ -1,5 +1,8 @@
 # Windows Agent Handoff: NovelAudio Stage 7B
 
+> 历史文档（阶段 7B）。2026-10-09 起 Windows agent 全面接管，权威说明见
+> `docs/AI_AUDIOBOOK_WINDOWS_TAKEOVER.md`；本文的执行顺序与「首个 FAIL 即停」等条款不再适用。
+
 This is the canonical handoff document:
 `scripts/novel-audio-local/WINDOWS_HANDOFF.md`.
 

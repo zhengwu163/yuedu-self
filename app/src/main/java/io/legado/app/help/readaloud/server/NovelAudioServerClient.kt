@@ -98,10 +98,15 @@ class NovelAudioServerClient(
         leaseId?.let(::checkLease)
         peekToken()
         if (isSelfHosted(leaseId)) {
-            return NovelAudioJson.analysis(
-                json("chapter/analyze", body, ANALYSIS_TIMEOUT_MILLIS, leaseId, "POST"),
-                request
-            )
+            val slot = singleFlightSlot()
+            return try {
+                NovelAudioJson.analysis(
+                    json("chapter/analyze", body, ANALYSIS_TIMEOUT_MILLIS, leaseId, "POST"),
+                    request
+                )
+            } finally {
+                slot.close()
+            }
         }
         val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
         val reservation = ledger.reserve(
@@ -184,6 +189,10 @@ class NovelAudioServerClient(
     private fun isSelfHosted(leaseId: String?): Boolean =
         leaseId != null && leaseId in selfHostedLeases
 
+    /** 豁免额度但不豁免单飞：家庭电脑一次只生成一段，并发会被服务端拒为 busy。 */
+    private fun singleFlightSlot(): NovelAudioBudgetLedger.Reservation =
+        (budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")).acquireSlot()
+
     suspend fun runtimeStatus(): RuntimeStatus = withContext(Dispatchers.IO) {
         NovelAudioJson.runtimeStatus(
             json("runtime/status", null, 15_000, null, "GET")
@@ -204,8 +213,13 @@ class NovelAudioServerClient(
             leaseId?.let(::checkLease)
             peekToken()
             if (isSelfHosted(leaseId)) {
-                val result = exchange(path, body, TTS_TIMEOUT_MILLIS, true, leaseId, "POST")
-                return@withContext SynthesizedAudio(result.bytes, result.type, result.profile)
+                val slot = singleFlightSlot()
+                return@withContext try {
+                    val result = exchange(path, body, TTS_TIMEOUT_MILLIS, true, leaseId, "POST")
+                    SynthesizedAudio(result.bytes, result.type, result.profile)
+                } finally {
+                    slot.close()
+                }
             }
             val ledger = budgetLedger ?: throw NovelAudioServerException("LOCAL_BUDGET_UNAVAILABLE")
             val reservation = ledger.reserve(

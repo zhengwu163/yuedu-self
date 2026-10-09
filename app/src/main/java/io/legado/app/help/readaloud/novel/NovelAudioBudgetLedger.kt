@@ -165,6 +165,17 @@ class NovelAudioBudgetLedger(
         }
     }
 
+    /**
+     * 只占用单飞生成许可，不扣额度、不读写账本；用于自托管服务（家庭电脑）的请求。
+     * 与 [reserve] 共用同一许可：本地服务同一时刻只生成一段，并发请求会被它拒为 busy。
+     */
+    fun acquireSlot(): Reservation {
+        if (!activeLock.tryAcquire()) {
+            throw budgetError("CONCURRENCY_LIMIT")
+        }
+        return Reservation { activeLock.release() }
+    }
+
     /** 云端确认免费额度耗尽后持久熔断，后续计费端点立即拒绝。 */
     fun blockCloudQuota() {
         synchronized(fileLock) {

@@ -59,6 +59,22 @@ class NovelAudioBudgetLedgerTest {
     }
 
     @Test
+    fun slotSharesSingleFlightPermitWithoutChargingBudget() {
+        val ledger = NovelAudioBudgetLedger(newStateFile())
+        ledger.acquireSlot().use {
+            try {
+                ledger.reserve(kind = NovelAudioBudgetLedger.Kind.TTS, utf16Characters = 1).close()
+                fail("reserve must be rejected while a slot is held")
+            } catch (error: NovelAudioServerException) {
+                assertEquals("CONCURRENCY_LIMIT", error.kind)
+            }
+        }
+        ledger.acquireSlot().close()
+        assertEquals(0, ledger.snapshot().ttsVendorRequests)
+        assertEquals(0, ledger.snapshot().ttsUtf16Characters)
+    }
+
+    @Test
     fun defaultCombinedBudgetIs120RequestsAnd29000Utf16Characters() {
         val ledger = NovelAudioBudgetLedger(newStateFile())
 
