@@ -1,11 +1,13 @@
 """Bounded waveform validation and local Ogg/Opus encoding."""
 
 import io
+from array import array
 import json
 import math
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 import wave
 from pathlib import Path
@@ -186,6 +188,37 @@ def _run(runner, command, timeout):
     return result
 
 
+def _normalize_quiet_wav(content):
+    """Boost only quiet speech; retain normal output and 2 dB peak headroom.
+
+    A peak below -10 dBFS triggers at most 24 dB gain. Silence and signals
+    below -60 dBFS RMS are left alone. This preserves dynamics and SNR;
+    it cannot repair room reverb or a poor reference recording.
+    """
+    with wave.open(io.BytesIO(content), "rb") as source:
+        params = source.getparams()
+        samples = array("h")
+        samples.frombytes(source.readframes(source.getnframes()))
+    if sys.byteorder != "little":
+        samples.byteswap()
+    peak = max((abs(value) for value in samples), default=0)
+    if not peak or peak >= 32767 * 10 ** (-10 / 20):
+        return content
+    rms = math.sqrt(sum(value * value for value in samples) / len(samples))
+    if rms < 32767 * 10 ** (-60 / 20):
+        return content
+    ceiling = round(32767 * 10 ** (-2 / 20))
+    gain = min(ceiling / peak, 10 ** (24 / 20))
+    result = array("h", (max(-ceiling, min(ceiling, round(value * gain))) for value in samples))
+    if sys.byteorder != "little":
+        result.byteswap()
+    output = io.BytesIO()
+    with wave.open(output, "wb") as target:
+        target.setparams(params)
+        target.writeframes(result.tobytes())
+    return output.getvalue()
+
+
 def _probe(path, ffprobe_path, runner, timeout):
     result = _run(
         runner,
@@ -255,7 +288,7 @@ def encode_ogg_opus(
     timeout=PROCESS_TIMEOUT,
 ):
     """Encode one waveform, deleting all private temporary files on every path."""
-    wav = waveform_to_wav(waveform)
+    wav = _normalize_quiet_wav(waveform_to_wav(waveform))
     atempo = _atempo_filter(speed)
     process_runner = runner or subprocess.run
     temp_root = Path(temp_root)

@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 import wave
+import struct
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +18,28 @@ class _Result:
 
 
 class AudioEncodingTest(unittest.TestCase):
+    def test_quiet_output_is_boosted_with_peak_headroom(self):
+        raw = waveform_to_wav(([0.02, -0.04] * 200, 24000))
+        corrected = audio._normalize_quiet_wav(raw)
+        with wave.open(io.BytesIO(corrected), "rb") as source:
+            values = [v[0] for v in struct.iter_unpack("<h", source.readframes(source.getnframes()))]
+        self.assertGreater(max(abs(v) for v in values), 20000)
+        self.assertLessEqual(max(abs(v) for v in values), round(32767 * 10 ** (-2 / 20)))
+        self.assertAlmostEqual(values[0] / values[1], -0.5, places=3)
+
+    def test_normal_loud_silent_and_noise_outputs_are_unchanged(self):
+        for samples in ([0.5,-0.8]*20, [1.0,-1.0]*20, [0.0]*40, [0.0001,-0.0001]*20):
+            raw = waveform_to_wav((samples,24000))
+            self.assertEqual(raw, audio._normalize_quiet_wav(raw))
+
+    def test_quiet_gain_is_capped_and_audio_header_preserved(self):
+        raw = waveform_to_wav(([0.002,-0.002]*100,24000))
+        corrected = audio._normalize_quiet_wav(raw)
+        with wave.open(io.BytesIO(raw),'rb') as before, wave.open(io.BytesIO(corrected),'rb') as after:
+            self.assertEqual(before.getparams(),after.getparams())
+            original=struct.unpack('<h',before.readframes(1))[0]
+            changed=struct.unpack('<h',after.readframes(1))[0]
+            self.assertLessEqual(changed/original,10**(24/20)+0.02)
     def test_qwen_batch_of_numpy_like_waveforms(self):
         class Array:
             def tolist(self):
@@ -58,6 +81,15 @@ class AudioEncodingTest(unittest.TestCase):
                         ).encode("utf-8")
                     )
                 self.assertEqual("ffmpeg", command[0])
+                with wave.open(command[command.index("-i") + 1], "rb") as source:
+                    samples = [value[0] for value in struct.iter_unpack(
+                        "<h", source.readframes(source.getnframes())
+                    )]
+                self.assertGreater(max(abs(value) for value in samples), 20000)
+                self.assertLessEqual(
+                    max(abs(value) for value in samples),
+                    round(32767 * 10 ** (-2 / 20)),
+                )
                 Path(command[-1]).write_bytes(b"OggS-test")
                 return _Result()
 
