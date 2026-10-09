@@ -7,6 +7,7 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import io.legado.app.help.readaloud.novel.NovelAudioChapterPlan
+import io.legado.app.help.readaloud.novel.NovelAudioSegmentIntent
 import io.legado.app.utils.GSON
 import kotlinx.parcelize.Parcelize
 
@@ -236,7 +237,39 @@ object NovelAudioPlanJson {
 
     fun decode(json: String): NovelAudioChapterPlan? {
         return kotlin.runCatching {
-            GSON.fromJson(json, NovelAudioChapterPlan::class.java)
+            // 计划类的 init 会校验 planId 等必填项；Gson 优先走全默认值的无参构造，
+            // 在填字段前就触发校验失败。先解到无校验的载体，再经主构造器完成校验。
+            val raw = GSON.fromJson(json, StoredPlan::class.java)
+            NovelAudioChapterPlan(
+                planId = raw.planId,
+                workKey = raw.workKey,
+                physicalBookUrl = raw.physicalBookUrl,
+                chapterIndex = raw.chapterIndex,
+                chapterUrl = raw.chapterUrl,
+                serverScope = raw.serverScope,
+                generation = raw.generation,
+                snapshotHash = raw.snapshotHash,
+                rulesVersion = raw.rulesVersion,
+                analysisVersion = raw.analysisVersion,
+                segments = raw.segments,
+                createdAt = raw.createdAt
+            )
         }.getOrNull()
     }
+
+    @Keep
+    private class StoredPlan(
+        val planId: String = "",
+        val workKey: String = "",
+        val physicalBookUrl: String = "",
+        val chapterIndex: Int = 0,
+        val chapterUrl: String = "",
+        val serverScope: String = "",
+        val generation: Long = 0L,
+        val snapshotHash: String = "",
+        val rulesVersion: String = "",
+        val analysisVersion: String = "1",
+        val segments: List<NovelAudioSegmentIntent> = emptyList(),
+        val createdAt: Long = 0L
+    )
 }
