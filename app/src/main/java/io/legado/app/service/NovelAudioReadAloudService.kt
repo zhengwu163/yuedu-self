@@ -355,9 +355,14 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                         }
                         // 跨章连播不带用户发起标记，准备策略不会自动发起；
                         // 若此处不补一次，界面会停在准备中且永远收不到完成事件。
+                        // 本章准备仍在进行时不补发，否则会取消进行中的分析并立即重发。
                         if (NovelAudioContinuationPolicy.shouldPrepareOnBlock(
                                 missingOrNotReady = true,
-                                hasCurrentWork = hasWork
+                                hasCurrentWork = hasWork,
+                                alreadyPreparing = NovelAudioPreparationCoordinator.isPreparing(
+                                    ReadBook.book?.bookUrl.orEmpty(),
+                                    ReadBook.durChapterIndex
+                                )
                             )
                         ) {
                             requestContinuationPreparation()

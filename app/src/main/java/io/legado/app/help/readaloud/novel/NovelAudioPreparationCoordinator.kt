@@ -97,6 +97,14 @@ object NovelAudioPreparationCoordinator {
         return snapshots[CacheKey(bookUrl, chapterIndex)]?.generation
     }
 
+    /** 当前请求就是这一章且准备任务仍在运行。 */
+    fun isPreparing(bookUrl: String, chapterIndex: Int): Boolean {
+        val currentRequest = request ?: return false
+        return currentRequest.bookUrl == bookUrl &&
+            currentRequest.chapterIndex == chapterIndex &&
+            prepareJob?.isActive == true
+    }
+
     fun onFinalContent(
         book: Book,
         chapter: BookChapter,

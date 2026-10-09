@@ -15,8 +15,13 @@ package io.legado.app.help.readaloud.novel
  */
 object NovelAudioContinuationPolicy {
 
+    /**
+     * 同一章已有进行中的准备时不再补发：补发会取消正在进行的分析并立刻重发，
+     * 真机上表现为同一章分析被请求两次（第二次撞服务端单生成槽）。
+     */
     fun shouldPrepareOnBlock(
         missingOrNotReady: Boolean,
-        hasCurrentWork: Boolean
-    ): Boolean = missingOrNotReady && hasCurrentWork
+        hasCurrentWork: Boolean,
+        alreadyPreparing: Boolean = false
+    ): Boolean = missingOrNotReady && hasCurrentWork && !alreadyPreparing
 }
