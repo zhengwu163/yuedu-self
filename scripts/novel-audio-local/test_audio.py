@@ -17,6 +17,15 @@ class _Result:
 
 
 class AudioEncodingTest(unittest.TestCase):
+    def test_qwen_batch_of_numpy_like_waveforms(self):
+        class Array:
+            def tolist(self):
+                return [0.0, 0.5, -1.0]
+        encoded = waveform_to_wav(([Array()], 24000))
+        with wave.open(io.BytesIO(encoded), "rb") as source:
+            self.assertEqual(3, source.getnframes())
+            self.assertEqual(24000, source.getframerate())
+
     def test_waveform_is_normalized_to_mono_pcm16_wav(self):
         encoded = waveform_to_wav(([0.0, 0.5, -1.0], 24000))
 

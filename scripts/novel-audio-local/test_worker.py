@@ -37,6 +37,34 @@ class _ExitingProcess:
 
 
 class WorkerProcessTest(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows graceful backend cleanup")
+    def test_idle_close_runs_backend_cleanup_before_forced_termination(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "closed"
+            script = (
+                "import json,sys,pathlib; "
+                "print(json.dumps({'ok':True,'event':'ready','profile':'profile'}),flush=True); "
+                "v=json.loads(sys.stdin.readline()); "
+                "pathlib.Path(sys.argv[1]).write_text(v['operation'])"
+            )
+            worker = SubprocessWorker([sys.executable, "-u", "-c", script, str(marker)], "profile")
+            worker.close()
+            self.assertEqual("close", marker.read_text())
+
+    def test_native_backend_stdout_does_not_corrupt_ipc(self):
+        with tempfile.TemporaryDirectory() as directory:
+            config_path = self._config(directory)
+            script = (
+                "import os,worker; original=worker._load_backend; "
+                "worker._load_backend=lambda *a: (os.write(1,b'native-log\\n'),original(*a))[1]; "
+                "raise SystemExit(worker._worker_main(__import__('sys').argv[1],True,'fake-local-v1'))"
+            )
+            worker = SubprocessWorker([sys.executable, "-u", "-c", script, str(config_path)], "fake-local-v1")
+            try:
+                self.assertEqual("u1", worker.analyze(self._request())["assignments"][0]["unitId"])
+            finally:
+                worker.close()
+
     def _config(self, directory):
         value = json.loads(
             (ROOT / "local-model.example.json").read_text(encoding="utf-8")

@@ -242,6 +242,7 @@ class SubprocessWorker:
         try:
             if self._closed:
                 return
+            self._graceful_close = not self._request_lock.locked()
             self.cancel()
             self._terminate_tree()
             self._reader.join(timeout=1)
@@ -262,6 +263,21 @@ class SubprocessWorker:
             self._close_lock.release()
 
     def _terminate_tree(self):
+        # Let an idle backend close its owned llama process before killing the
+        # Windows venv launcher. Keep the force-stop path for busy/hung workers.
+        if (os.name == "nt" and getattr(self, "_graceful_close", True)
+                and getattr(self.process, "stdin", None) is not None
+                and self.process.poll() is None and self._request_lock.acquire(blocking=False)):
+            try:
+                try:
+                    self.process.stdin.write('{"operation":"close"}\n')
+                    self.process.stdin.flush()
+                    self.process.wait(timeout=2)
+                    return
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    pass
+            finally:
+                self._request_lock.release()
         # Every worker is its own POSIX session. Killing just the parent loses
         # ownership of llama/encoder children, including children holding pipes.
         if os.name == "posix":
@@ -423,6 +439,11 @@ def _worker_main(config_path, fake, profile_id):
     # the Agent always reads and writes UTF-8; chapter text would be corrupted.
     for stream in (sys.stdin, sys.stdout):
         stream.reconfigure(encoding="utf-8")
+    # Python redirect_stdout cannot catch native libraries writing to fd 1.
+    # Keep a dedicated IPC descriptor and send all backend output to stderr.
+    ipc = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8", buffering=1)
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = ipc
     try:
         with redirect_stdout(sys.stderr):
             backend = _load_backend(config_path, fake, profile_id)

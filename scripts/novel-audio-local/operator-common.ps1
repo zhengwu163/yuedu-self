@@ -330,7 +330,7 @@ function Write-SafeStateText {
     param(
         [Parameter(Mandatory = $true)]$Context,
         [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Content,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Content,
         [System.Text.Encoding]$Encoding = [System.Text.Encoding]::ASCII
     )
 
@@ -436,6 +436,43 @@ function Get-ConfiguredPython {
     }
     Assert-NoReparsePath -Path $python
     return $python
+}
+
+function Get-ConfiguredBasePython {
+    param([Parameter(Mandatory = $true)]$Context)
+
+    $python = Get-ConfiguredPython $Context
+    $scripts = Split-Path -Parent $python
+    if ((Split-Path -Leaf $scripts) -ine "Scripts") { return $python }
+    $venvConfig = Join-Path (Split-Path -Parent $scripts) "pyvenv.cfg"
+    if (-not (Test-Path -LiteralPath $venvConfig -PathType Leaf)) { return $python }
+    $text = Read-SafeText $venvConfig
+    $homeMatch = [regex]::Match($text, '(?m)^home\s*=\s*([^\r\n]+)')
+    if (-not $homeMatch.Success) { throw "venv base interpreter is not configured" }
+    $base = [IO.Path]::GetFullPath((Join-Path $homeMatch.Groups[1].Value.Trim() "python.exe"))
+    Assert-NoReparsePath -Path $base
+    return $base
+}
+
+function Resolve-AgentLaunchPin {
+    param($Context, $LaunchPin, [datetime]$Deadline)
+
+    $base = Get-ConfiguredBasePython $Context
+    if (Test-ExactPathToken $base (Get-ConfiguredPython $Context)) { return $LaunchPin }
+    while ((Get-Date) -lt $Deadline -and (Test-ProcessPin $LaunchPin)) {
+        $agentMatches = @()
+        foreach ($child in @(Get-ChildProcessRecords $LaunchPin)) {
+            if ((Test-ExactPathToken $child.Process.ExecutablePath $base) -and
+                (Test-AgentCommand $child.Process $Context)) {
+                $agentMatches += $child.Pin
+            } else { $child.Pin.Handle.Dispose() }
+        }
+        if ($agentMatches.Count -eq 1) { return $agentMatches[0] }
+        foreach ($candidate in $agentMatches) { $candidate.Handle.Dispose() }
+        if ($agentMatches.Count -gt 1) { throw "ambiguous agent descendants" }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "owned venv agent did not appear"
 }
 
 function Get-ConfigHash {
@@ -573,8 +610,12 @@ function Test-AgentCommand {
         return $false
     }
     $python = Get-ConfiguredPython $Context
-    if (-not (Test-ExactPathToken $arguments[0] $python) -or
-        -not (Test-ExactPathToken ([string]$Process.ExecutablePath) $python)) { return $false }
+    $base = Get-ConfiguredBasePython $Context
+    $argumentOwned = (Test-ExactPathToken $arguments[0] $python) -or
+        (Test-ExactPathToken $arguments[0] $base)
+    $imageOwned = (Test-ExactPathToken ([string]$Process.ExecutablePath) $python) -or
+        (Test-ExactPathToken ([string]$Process.ExecutablePath) $base)
+    if (-not $argumentOwned -or -not $imageOwned) { return $false }
     if ($arguments[2] -ceq "--serve" -and $arguments[3] -ceq "--config") {
         return Test-ExactPathToken $arguments[4] $Context.ConfigPath
     }

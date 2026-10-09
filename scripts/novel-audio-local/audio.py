@@ -51,8 +51,9 @@ def _waveform_samples(value):
         raise AudioError()
     if not isinstance(value, (list, tuple)) or not value:
         raise AudioError()
-    if isinstance(value[0], (list, tuple)):
-        value = value[0]
+    first = _as_list(value[0])
+    if isinstance(first, (list, tuple)):
+        value = first
     value = _as_list(value)
     if not isinstance(value, (list, tuple)) or not value:
         raise AudioError()

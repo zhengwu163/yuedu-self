@@ -14,6 +14,16 @@ from voices import VoiceCatalogError
 
 
 class LocalAgentStartupTest(unittest.TestCase):
+    def test_operator_owned_pid_is_retained_until_operator_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = LocalAgent(self.write_config(root, self.registry()), fake=True)
+            agent._write_pid()
+            (root / "state/agent.owner.json").write_text("{}", encoding="utf-8")
+            agent._clear_pid()
+            self.assertTrue((root / "state/agent.pid").exists())
+            agent.close()
+
     def wait_until(self, predicate, timeout=3):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

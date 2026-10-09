@@ -79,6 +79,67 @@ try {
             "the exact service command was rejected"
     }
 
+    Invoke-Case "venv base interpreter keeps exact command ownership" {
+        $venv = Join-Path $script:fixture "test-venv"
+        $scripts = Join-Path $venv "Scripts"
+        $base = Join-Path $script:fixture "base-python"
+        New-Item -ItemType Directory -Path $scripts, $base -Force | Out-Null
+        $venvPython = Join-Path $scripts "python.exe"
+        $basePython = Join-Path $base "python.exe"
+        Set-Content -LiteralPath $venvPython -Value "" -Encoding ASCII
+        Set-Content -LiteralPath $basePython -Value "" -Encoding ASCII
+        [IO.File]::WriteAllText((Join-Path $venv "pyvenv.cfg"),
+            ("home = " + $base + "`n"), (New-Object Text.UTF8Encoding($false)))
+        $configText = @{ tts = @{ pythonExecutable = $venvPython } } | ConvertTo-Json
+        [IO.File]::WriteAllText($configPath, $configText,
+            (New-Object Text.UTF8Encoding($false)))
+        try {
+            $child = [pscustomobject]@{
+                ExecutablePath = $basePython
+                CommandLine = ('"{0}" "{1}" --serve --config "{2}"' -f
+                    $basePython, $context.ScriptPath, $context.ConfigPath)
+            }
+            Assert-OperatorTest (Test-AgentCommand $child $context) `
+                "verified venv base interpreter was rejected"
+            $originalPinTest = (Get-Command Test-ProcessPin).ScriptBlock
+            $originalChildren = (Get-Command Get-ChildProcessRecords).ScriptBlock
+            $script:launcherPin = [pscustomobject]@{ ProcessId = 1111 }
+            $script:agentChildPin = [pscustomobject]@{ ProcessId = 2222 }
+            $script:agentChild = $child
+            function script:Test-ProcessPin {
+                param($Pin, [switch]$ThrowOnChange)
+                return [object]::ReferenceEquals($Pin, $script:launcherPin)
+            }
+            function script:Get-ChildProcessRecords {
+                param($ParentPin)
+                return [pscustomobject]@{
+                    Pin = $script:agentChildPin; Process = $script:agentChild
+                }
+            }
+            try {
+                $selected = Resolve-AgentLaunchPin -Context $context `
+                    -LaunchPin $script:launcherPin -Deadline ((Get-Date).AddSeconds(1))
+                Assert-OperatorTest `
+                    ([object]::ReferenceEquals($selected, $script:agentChildPin)) `
+                    "venv launcher PID was used instead of its owned agent child"
+            } finally {
+                Set-Item Function:\script:Test-ProcessPin -Value $originalPinTest
+                Set-Item Function:\script:Get-ChildProcessRecords -Value $originalChildren
+            }
+            $child.ExecutablePath = $fakePython
+            Assert-OperatorTest (-not (Test-AgentCommand $child $context)) `
+                "unrelated interpreter image was accepted"
+            $child.ExecutablePath = $basePython
+            $child.CommandLine = ('"{0}" "{1}.bak" --serve --config "{2}"' -f
+                $basePython, $context.ScriptPath, $context.ConfigPath)
+            Assert-OperatorTest (-not (Test-AgentCommand $child $context)) `
+                "venv alias bypassed exact script ownership"
+        } finally {
+            [IO.File]::WriteAllText($configPath, $fixtureConfig,
+                (New-Object Text.UTF8Encoding($false)))
+        }
+    }
+
     Invoke-Case "operator lock serializes concurrent lifecycle commands" {
         $first = Enter-OperatorLock -Context $context
         try {
@@ -93,6 +154,12 @@ try {
         } finally {
             Exit-OperatorLock $first
         }
+    }
+
+    Invoke-Case "stop marker accepts empty content" {
+        Touch-SafeStateFile -Context $context -Name "agent.stop"
+        Assert-OperatorTest ((Read-SafeText (Join-Path $context.State "agent.stop")) -eq "") "stop marker was not empty"
+        Remove-SafeStateFile -Context $context -Name "agent.stop"
     }
 
     Invoke-Case "creation identity is part of the process pin" {
@@ -133,30 +200,43 @@ try {
             CreationDate = "mock"
             CreationTicks = [int64]1
         }
-        function global:Add-OwnedChildren {
+        $originalFunctions = @{}
+        foreach ($name in @("Add-OwnedChildren", "Get-AliveOwnedRecords",
+            "Invoke-AgentTermination", "Test-ProcessPin")) {
+            $originalFunctions[$name] = (Get-Command $name).ScriptBlock
+        }
+        function script:Add-OwnedChildren {
             param($ParentPin, $Owned)
         }
-        function global:Get-AliveOwnedRecords {
+        function script:Get-AliveOwnedRecords {
             param($Owned)
             if ($script:alive) {
-                return @($script:mockPin)
+                return @($script:mockPin, [pscustomobject]@{ ProcessId = 4343 })
             }
             return @()
         }
-        function global:Invoke-AgentTermination {
+        function script:Invoke-AgentTermination {
             param([int]$AgentPid)
             $script:terminationCalls += $AgentPid
             $script:alive = $false
         }
-        $owned = @{ "4242" = $script:mockPin }
-        Stop-OwnedRecords -Owned $owned -Context $context -TimeoutSeconds 1
-        Assert-OperatorTest `
-            ($script:terminationCalls.Count -eq 1 -and
-             $script:terminationCalls[0] -eq 4242) `
-            "termination boundary targeted an unexpected PID"
-        Remove-Item function:\Add-OwnedChildren -Force
-        Remove-Item function:\Get-AliveOwnedRecords -Force
-        Remove-Item function:\Invoke-AgentTermination -Force
+        function script:Test-ProcessPin {
+            param($Pin, [switch]$ThrowOnChange)
+            return [object]::ReferenceEquals($Pin, $script:mockPin)
+        }
+        try {
+            $owned = @{ "4242" = $script:mockPin }
+            Stop-OwnedRecords -Owned $owned -Context $context -TimeoutSeconds 1
+            Assert-OperatorTest `
+                ($script:terminationCalls.Count -eq 1 -and
+                 $script:terminationCalls[0] -eq 4242) `
+                "termination boundary targeted an unexpected PID"
+        } finally {
+            foreach ($name in $originalFunctions.Keys) {
+                Set-Item -Path ("Function:\script:" + $name) `
+                    -Value $originalFunctions[$name]
+            }
+        }
     }
 
     Invoke-Case "reparse-point state is rejected before writes" {

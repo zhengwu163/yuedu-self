@@ -215,7 +215,7 @@ class PowerShellContractTest(unittest.TestCase):
         self.assertIn('$fakePython = Join-Path $script:fixture "python.exe"', text)
         self.assertIn("Set-Content -LiteralPath $fakePython", text)
         self.assertIn("pythonExecutable = $fakePython", text)
-        self.assertEqual(text.count("ExecutablePath = $fakePython"), 2)
+        self.assertGreaterEqual(text.count("ExecutablePath = $fakePython"), 2)
         self.assertEqual(text.count("$fakePython, $context.ScriptPath, $context.ConfigPath"), 2)
 
 

@@ -114,6 +114,12 @@ try {
             throw "started process command is not owned"
         }
         $pin = New-ProcessPin -Process $processInfo
+        $agentPin = Resolve-AgentLaunchPin -Context $context -LaunchPin $pin `
+            -Deadline ((Get-Date).AddSeconds($StartupTimeoutSeconds))
+        if ($agentPin.ProcessId -ne $pin.ProcessId) {
+            $pin.Handle.Dispose()
+            $pin = $agentPin
+        }
         $stateWriteAttempted = $true
         Save-AgentOwner -Context $context -Pin $pin
         Write-SafeStateText `

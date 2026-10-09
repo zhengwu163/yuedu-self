@@ -188,6 +188,10 @@ class LocalAgent:
 
     def _clear_pid(self):
         try:
+            # The Windows operator revalidates this PID after graceful exit.
+            # It owns removal of the paired PID/owner records under its lock.
+            if (self.state_dir / "agent.owner.json").exists():
+                return
             path = self.state_dir / "agent.pid"
             if path.read_text(encoding="ascii").strip() == str(os.getpid()):
                 path.unlink()
