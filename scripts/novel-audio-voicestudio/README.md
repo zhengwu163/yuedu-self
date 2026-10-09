@@ -97,6 +97,10 @@ POST /v1/tts/synthesize
 Director（如百炼桥接）时 `analysis` 计费。旧服务不返回该字段时，Android 按全部
 计费处理。
 
+`/v1/chapter/analyze` 按请求体摘要在内存中缓存最近 32 章的结果（重启清空）：
+合成失败后 App 重试同一章不会再次调用 Director；同一章分析进行中又收到相同请求时，
+等待前一次结果而不是返回 429。不同章节仍共用单生成槽。
+
 ## 本机 VoiceStudio（已验证 0.5.6）
 
 上游为开源项目 `debpalash/VoiceStudio`（AGPL-3.0，默认引擎 OmniVoice，

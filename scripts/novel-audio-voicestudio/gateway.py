@@ -1,6 +1,10 @@
+import copy
+import hashlib
 import hmac
 import inspect
+import json
 import threading
+from collections import OrderedDict
 
 from errors import (
     AuthenticationError,
@@ -17,6 +21,20 @@ from protocol import (
 )
 from registry import VoiceRegistry
 from lifecycle import RequestContext
+
+ANALYSIS_CACHE_SIZE = 32
+
+
+class _PendingAnalysis:
+    def __init__(self):
+        self.done = threading.Event()
+        self.value = None
+
+
+def _analysis_key(body):
+    # 请求体已通过严格解析；按规范化 JSON 取摘要，字段顺序不同也视为同一请求。
+    canonical = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class NovelAudioGateway:
@@ -36,6 +54,10 @@ class NovelAudioGateway:
         self.request_timeout = request_timeout
         self._contexts = set()
         self._contexts_lock = threading.Lock()
+        # 只在内存中保留最近的章节分析结果，进程重启即清空，不落盘正文衍生数据。
+        self._analysis_cache = OrderedDict()
+        self._analysis_pending = {}
+        self._analysis_lock = threading.Lock()
 
     def authorized(self, authorization):
         return hmac.compare_digest(
@@ -117,11 +139,40 @@ class NovelAudioGateway:
 
     def _analyze(self, body, context):
         request = parse_analysis(body)
-        if not _invoke(self.director.health, context=context).ready:
-            raise NotReadyError()
-        with self._generation_slot():
-            value = _invoke(self.director.analyze, request, context=context)
-        return 200, {"Content-Type": "application/json"}, value
+        key = _analysis_key(body)
+        with self._analysis_lock:
+            cached = self._analysis_cache.get(key)
+            if cached is not None:
+                self._analysis_cache.move_to_end(key)
+                return 200, {"Content-Type": "application/json"}, copy.deepcopy(cached)
+            pending = self._analysis_pending.get(key)
+            owner = pending is None
+            if owner:
+                pending = _PendingAnalysis()
+                self._analysis_pending[key] = pending
+        if not owner:
+            # App 取消后立即重发同一章分析时，等进行中的那次结果，而不是回 429 让整章失败。
+            if not pending.done.wait(context.remaining()):
+                context.remaining()
+            if pending.value is None:
+                raise BusyError()
+            return 200, {"Content-Type": "application/json"}, copy.deepcopy(pending.value)
+        try:
+            if not _invoke(self.director.health, context=context).ready:
+                raise NotReadyError()
+            with self._generation_slot():
+                value = _invoke(self.director.analyze, request, context=context)
+            with self._analysis_lock:
+                # 同一章节文本的分析结果可复用：后续合成失败重试时不再重复消耗分析额度。
+                self._analysis_cache[key] = copy.deepcopy(value)
+                while len(self._analysis_cache) > ANALYSIS_CACHE_SIZE:
+                    self._analysis_cache.popitem(last=False)
+            pending.value = value
+            return 200, {"Content-Type": "application/json"}, value
+        finally:
+            with self._analysis_lock:
+                self._analysis_pending.pop(key, None)
+            pending.done.set()
 
     def _audio(self, operation, request, context):
         if not _invoke(self.speech.health, context=context).ready:

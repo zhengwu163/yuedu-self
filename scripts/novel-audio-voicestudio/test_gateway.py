@@ -38,10 +38,11 @@ class FakeDirector:
         return HealthStatus(ready=self.ready)
 
     def analyze(self, request):
+        units = request.as_dict()["units"] if hasattr(request, "as_dict") else request["units"]
         return {
             "assignments": [
                 {"unitId": unit["unitId"], "speakerId": "narrator"}
-                for unit in request["units"]
+                for unit in units
             ],
             "newCharacters": [],
             "aliasUpdates": [],
@@ -157,6 +158,92 @@ class GatewayTest(unittest.TestCase):
 
         self.assertEqual(503, status)
         self.assertEqual("not_ready", body["error"]["code"])
+
+    def analysis_body(self):
+        return {
+            "bookId": "book", "chapterId": "chapter", "textHash": "hash",
+            "analysisVersion": "1", "characters": [],
+            "units": [{"unitId": "u1", "text": "旁白"}],
+            "previousContext": {"recentAssignments": []},
+        }
+
+    def test_repeated_chapter_analysis_reuses_the_first_result(self):
+        # 真机实测：合成失败后每次重试都重新分析，白白消耗云端分析额度。
+        class CountingDirector(FakeDirector):
+            calls = 0
+
+            def analyze(self, request):
+                CountingDirector.calls += 1
+                return super().analyze(request)
+
+        gateway = NovelAudioGateway(FakeSpeech(), CountingDirector(), "local-token")
+        for _ in range(2):
+            status, _, body = gateway.respond(
+                "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+            )
+            self.assertEqual(200, status)
+            body["assignments"].clear()  # 调用方修改返回值不得污染缓存
+        self.assertEqual(1, CountingDirector.calls)
+        _, _, body = gateway.respond(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        )
+        self.assertEqual([{"unitId": "u1", "speakerId": "narrator"}], body["assignments"])
+
+    def test_concurrent_identical_analysis_waits_instead_of_busy(self):
+        # 真机实测：App 取消后立即重发同一章分析，第二个请求撞单生成槽被回 429，整章判失败。
+        import threading
+
+        started, release = threading.Event(), threading.Event()
+
+        class SlowDirector(FakeDirector):
+            calls = 0
+
+            def analyze(self, request):
+                SlowDirector.calls += 1
+                started.set()
+                release.wait(2)
+                return super().analyze(request)
+
+        gateway = NovelAudioGateway(FakeSpeech(), SlowDirector(), "local-token")
+        results = []
+        first = threading.Thread(target=lambda: results.append(gateway.respond(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        )))
+        first.start()
+        self.assertTrue(started.wait(2))
+        threading.Timer(0.1, release.set).start()
+        status, _, body = gateway.respond(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        )
+        first.join(2)
+        self.assertEqual(200, status)
+        self.assertEqual("narrator", body["assignments"][0]["speakerId"])
+        self.assertEqual(200, results[0][0])
+        self.assertEqual(1, SlowDirector.calls)
+
+    def test_different_chapters_still_share_the_single_generation_slot(self):
+        import threading
+
+        started, release = threading.Event(), threading.Event()
+
+        class SlowDirector(FakeDirector):
+            def analyze(self, request):
+                started.set()
+                release.wait(2)
+                return super().analyze(request)
+
+        gateway = NovelAudioGateway(FakeSpeech(), SlowDirector(), "local-token")
+        first = threading.Thread(target=gateway.respond, args=(
+            "POST", "/v1/chapter/analyze", "Bearer local-token", self.analysis_body(),
+        ))
+        first.start()
+        self.assertTrue(started.wait(2))
+        other = dict(self.analysis_body(), chapterId="chapter-2")
+        status, _, body = gateway.respond("POST", "/v1/chapter/analyze", "Bearer local-token", other)
+        release.set()
+        first.join(2)
+        self.assertEqual(429, status)
+        self.assertEqual("busy", body["error"]["code"])
 
 
 if __name__ == "__main__":
