@@ -16,6 +16,44 @@ import org.junit.Test
 class NovelAudioLocalFirstPolicyTest {
 
     @Test
+    fun `pinned snapshot remains reusable after the reader generation resets`() {
+        val decision = NovelAudioLocalFirstPolicy.decide(
+            NovelAudioStates.READY, 98765L, 1L, true, false,
+            planSnapshotHash = "snapshot-a", expectedSnapshotHash = "snapshot-a"
+        )
+        assertEquals(NovelAudioLocalFirstPolicy.Decision.PLAY_LOCAL, decision)
+    }
+
+    @Test
+    fun `changed content is rejected even when the transient generation matches`() {
+        val decision = NovelAudioLocalFirstPolicy.decide(
+            NovelAudioStates.READY, 1L, 1L, true, false,
+            planSnapshotHash = "snapshot-a", expectedSnapshotHash = "snapshot-b"
+        )
+        assertEquals(NovelAudioLocalFirstPolicy.Decision.WAIT_FOR_NETWORK, decision)
+    }
+
+    @Test
+    fun `known snapshot identity never falls back to an unverified generation`() {
+        for (hash in listOf(null, "")) {
+            val decision = NovelAudioLocalFirstPolicy.decide(
+                NovelAudioStates.READY, 1L, 1L, true, false,
+                planSnapshotHash = hash, expectedSnapshotHash = "snapshot-a"
+            )
+            assertEquals(NovelAudioLocalFirstPolicy.Decision.WAIT_FOR_NETWORK, decision)
+        }
+    }
+
+    @Test
+    fun `matching snapshot never permits incomplete audio`() {
+        val decision = NovelAudioLocalFirstPolicy.decide(
+            NovelAudioStates.READY, 98765L, 1L, false, false,
+            planSnapshotHash = "snapshot-a", expectedSnapshotHash = "snapshot-a"
+        )
+        assertEquals(NovelAudioLocalFirstPolicy.Decision.WAIT_FOR_NETWORK, decision)
+    }
+
+    @Test
     fun `complete local plan plays without any network use`() {
         val decision = NovelAudioLocalFirstPolicy.decide(
             planState = NovelAudioStates.READY,

@@ -91,3 +91,16 @@ Report acquisition failure using the fixed service-kind message; cancellation st
 propagates. Runtime release runs in NonCancellable IO with its existing 15-second HTTP
 limit, so cancellation does not prevent server cleanup. Never expose response bodies.
 Device retry, cached offline playback and process-restart resume remain required.
+### 2026-10-10 offline restart follow-up
+
+Real PINNED current chapter: READY, 529 characters, 28 intents (21 spoken), 3 voices,
+max spoken length 48, first artifact 39.9s, complete batch 207.5s. Ogg/Opus mono
+samples exported under diagnostics/phone-e2e-72769071. Airplane+Wi-Fi-off playback
+advanced 122->239->303->324, but a process restart produced WAITING_NETWORK.
+Root cause: transient reader generation is compared with the content-derived PINNED
+batch generation. Three red assertions cover same content across generations,
+changed content despite equal generation, and missing verified identity.
+Local gate now compares the existing snapshot hash (book/chapter/text/rules identity),
+with READY + all artifacts still mandatory. Legacy callers without a snapshot retain
+generation checking. The current chapter passes its frozen snapshot before any remote
+client is created; actual offline restart needs another signed device delivery.

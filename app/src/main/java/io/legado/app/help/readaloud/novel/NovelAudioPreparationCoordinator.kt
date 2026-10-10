@@ -176,7 +176,8 @@ object NovelAudioPreparationCoordinator {
                 localFirstGate.decide(
                     bookUrl = currentRequest.bookUrl,
                     chapterIndex = currentRequest.chapterIndex,
-                    expectedGeneration = entry.generation
+                    expectedGeneration = entry.generation,
+                    expectedSnapshotHash = entry.snapshot.snapshotHash
                 )
             ) {
                 NovelAudioLocalFirstPolicy.Decision.PLAY_LOCAL ->

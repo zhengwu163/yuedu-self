@@ -14,6 +14,24 @@ import org.junit.Test
  */
 class NovelAudioLocalFirstGateTest {
 
+    @Test
+    fun `verified pinned snapshot survives a process generation reset offline`() {
+        val gate = NovelAudioLocalFirstGate(
+            plan = { _, _ -> NovelAudioLocalFirstGate.LocalPlanSnapshot(
+                NovelAudioStates.READY, 98765L, true, "snapshot-a"
+            ) },
+            online = { false }
+        )
+        assertEquals(
+            NovelAudioLocalFirstPolicy.Decision.PLAY_LOCAL,
+            gate.decide("book://pinned", 0, 1L, "snapshot-a")
+        )
+        assertEquals(
+            NovelAudioLocalFirstPolicy.Decision.WAIT_FOR_NETWORK,
+            gate.decide("book://pinned", 0, 98765L, "changed-snapshot")
+        )
+    }
+
     private val book = "https://example.test/book"
 
     @Test

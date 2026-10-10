@@ -6,7 +6,7 @@ import io.legado.app.data.entities.NovelAudioStates
  * 本地优先与离线零网络的唯一判定点。
  *
  * 只读入本地 Room 状态与网络可用性，不做 IO、不发请求，便于在 JVM 上完整验证。
- * 规则有意保守：只有「同一代次的 READY 计划 + 全部 artifact 就绪」才允许直接播放；
+ * 规则有意保守：只有「同一章节快照的 READY 计划 + 全部 artifact 就绪」才允许直接播放；
  * 其余情况在线才准备远端资源，离线一律等待网络，绝不用不完整清单凑合播放。
  */
 object NovelAudioLocalFirstPolicy {
@@ -27,13 +27,19 @@ object NovelAudioLocalFirstPolicy {
         planGeneration: Long?,
         expectedGeneration: Long?,
         allArtifactsReady: Boolean,
-        online: Boolean
+        online: Boolean,
+        planSnapshotHash: String? = null,
+        expectedSnapshotHash: String? = null
     ): Decision {
-        val reusable = planState == NovelAudioStates.READY &&
-            allArtifactsReady &&
-            // 代次未知时不能复用本地计划：正文可能已经变化。
-            expectedGeneration != null &&
-            planGeneration == expectedGeneration
+        // Reader generations reset on process restart and differ from PINNED batch generations.
+        // The snapshot hash also binds book/chapter identity and preprocessing rules.
+        val sameContent = if (expectedSnapshotHash != null) {
+            expectedSnapshotHash.isNotBlank() && planSnapshotHash == expectedSnapshotHash
+        } else {
+            // Compatibility for callers that have not supplied a verified snapshot identity.
+            expectedGeneration != null && planGeneration == expectedGeneration
+        }
+        val reusable = planState == NovelAudioStates.READY && allArtifactsReady && sameContent
         return when {
             reusable -> Decision.PLAY_LOCAL
             online -> Decision.PREPARE_REMOTE

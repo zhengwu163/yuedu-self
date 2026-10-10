@@ -22,13 +22,15 @@ class NovelAudioLocalFirstGate(
     data class LocalPlanSnapshot(
         val state: String,
         val generation: Long,
-        val allArtifactsReady: Boolean
+        val allArtifactsReady: Boolean,
+        val snapshotHash: String? = null
     )
 
     fun decide(
         bookUrl: String,
         chapterIndex: Int,
-        expectedGeneration: Long?
+        expectedGeneration: Long?,
+        expectedSnapshotHash: String? = null
     ): NovelAudioLocalFirstPolicy.Decision {
         val snapshot = kotlin.runCatching { plan(bookUrl, chapterIndex) }.getOrNull()
         return NovelAudioLocalFirstPolicy.decide(
@@ -36,7 +38,9 @@ class NovelAudioLocalFirstGate(
             planGeneration = snapshot?.generation,
             expectedGeneration = expectedGeneration,
             allArtifactsReady = snapshot?.allArtifactsReady ?: false,
-            online = online()
+            online = online(),
+            planSnapshotHash = snapshot?.snapshotHash,
+            expectedSnapshotHash = expectedSnapshotHash
         )
     }
 
@@ -52,7 +56,8 @@ class NovelAudioLocalFirstGate(
                         generation = entity.generation,
                         allArtifactsReady = segmentIds.isNotEmpty() &&
                             NovelAudioRepository(appDb)
-                                .allArtifactsReady(entity.planId, segmentIds)
+                                .allArtifactsReady(entity.planId, segmentIds),
+                        snapshotHash = decoded?.snapshotHash
                     )
                 }
             },

@@ -19,6 +19,18 @@ import org.junit.Test
 class NovelAudioPreparationCoordinatorTest {
 
     @Test
+    fun currentSnapshotIdentityReachesTheLocalGateBeforeRemoteSetup() {
+        val root = sequenceOf(java.io.File("src/main/java"), java.io.File("app/src/main/java"))
+            .first { it.isDirectory }
+        val source = java.io.File(root,
+            "io/legado/app/help/readaloud/novel/NovelAudioPreparationCoordinator.kt").readText()
+        val gateAt = source.indexOf("localFirstGate.decide(")
+        val identityAt = source.indexOf("expectedSnapshotHash = entry.snapshot.snapshotHash", gateAt)
+        val environmentAt = source.indexOf("NovelAudioPreparationEnvironment.open()")
+        assertTrue(identityAt > gateAt && identityAt < environmentAt)
+    }
+
+    @Test
     fun everyStartGetsANewTokenEvenWhenTheRequestIsIdentical() {
         val lifecycle = newLifecycle()
         val request = lifecycle.replaceRequest("book://same", 3, NovelAudioRetention.AUTO)
