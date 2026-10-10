@@ -104,3 +104,24 @@ Local gate now compares the existing snapshot hash (book/chapter/text/rules iden
 with READY + all artifacts still mandatory. Legacy callers without a snapshot retain
 generation checking. The current chapter passes its frozen snapshot before any remote
 client is created; actual offline restart needs another signed device delivery.
+
+### 2026-10-10 Windows-closed HTTP TTS follow-up
+
+- Final c137884f debug package passed actual airplane-mode force-stop/resume:
+  playback restarted in 3.7s and the saved reading position advanced without network.
+- Ordinary system TTS passed with init/start/done callbacks and zero utterance errors.
+- The existing unauthenticated HTTP provider returned JSON errors containing 502/404
+  hints. Its error body entered the exception and silent fallback advanced playback;
+  the two other configured providers require a user login. Provider availability is
+  not repaired by replacing it with a mock or inventing credentials.
+- Bounded client fix: validate status and content type before exposing either URL
+  template or script-engine response to the decoder; close rejected bodies without
+  reading them, use fixed codes only, and pause/show the error instead of silent
+  fallback for these deterministic rejections. Preserve successful binary streams
+  and legacy responses with no Content-Type. Remove chapter text from fallback and
+  playback-error logs. No local-model protocol or model lifecycle changes.
+- Red evidence: eight response-validation assertions, four integration/privacy
+  assertions, then one explicit media-pause wiring assertion. Green checks include
+  the full JVM suite, pre-commit gates and original-signature Windows debug build.
+- Actual new-package phone playback remains required if ADB is disconnected; never
+  promote JVM response fixtures to a real model/device acceptance claim.

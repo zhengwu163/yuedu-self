@@ -36,6 +36,8 @@ import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.exoplayer.InputStreamDataSource
 import io.legado.app.help.http.okHttpClient
 import io.legado.app.help.readaloud.prebuild.TtsCacheKeys
+import io.legado.app.help.readaloud.speech.HttpTtsResponseException
+import io.legado.app.help.readaloud.speech.HttpTtsResponseValidator
 import io.legado.app.model.ReadAloud
 import io.legado.app.model.ReadBook
 import io.legado.app.model.analyzeRule.AnalyzeUrl
@@ -191,9 +193,18 @@ class HttpReadAloudService : BaseReadAloudService(),
                 val httpTts = resolveCurrentHttpTts()
                 playDownloadQueue(httpTts)
             }
-        }.onError {
-            AppLog.put("朗读下载出错\n${it.localizedMessage}", it, true)
+        }.onError(Main) {
+            reportDownloadError(it)
         }
+    }
+
+    private fun reportDownloadError(error: Throwable) {
+        if (error is HttpTtsResponseException) {
+            // 下载在后台进行；拒绝后同步暂停媒体状态，不能继续显示播放或跳过缺失段落。
+            pauseReadAloud()
+            toastOnUi(error.localizedMessage.orEmpty())
+        }
+        AppLog.put("朗读下载出错\n${error.localizedMessage}", error, true)
     }
 
     /** 按段下载队列装配（downloadAndPlayAudios/流式 type=2 降级共用；execute 块（CoroutineScope）内调用） */
@@ -208,7 +219,7 @@ class HttpReadAloudService : BaseReadAloudService(),
             val fileName = md5SpeakFileName(text)
             val speakText = text.replace(AppPattern.notReadAloudRegex, "")
             if (speakText.isEmpty()) {
-                AppLog.put("阅读段落内容为空，使用无声音频代替。\n朗读文本：$text")
+                AppLog.put("阅读段落内容为空，使用无声音频代替。")
                 createSilentSound(fileName)
             } else if (!hasSpeakFile(fileName)) {
                 try {
@@ -309,7 +320,7 @@ class HttpReadAloudService : BaseReadAloudService(),
                     }
                     val speakText = text.replace(AppPattern.notReadAloudRegex, "")
                     if (speakText.isEmpty()) {
-                        AppLog.put("阅读段落内容为空，使用无声音频代替。\n朗读文本：$speakText")
+                        AppLog.put("阅读段落内容为空，使用无声音频代替。")
                     }
                     val fileName = md5SpeakFileName(text)
                     val dataSourceFactory = createDataSourceFactory(httpTts, speakText)
@@ -332,8 +343,8 @@ class HttpReadAloudService : BaseReadAloudService(),
                 }
                 preDownloadAudiosStream(httpTts, downloaderChannel)
             }
-        }.onError {
-            AppLog.put("朗读下载出错\n${it.localizedMessage}", it, true)
+        }.onError(Main) {
+            reportDownloadError(it)
         }
     }
 
@@ -432,7 +443,9 @@ class HttpReadAloudService : BaseReadAloudService(),
                 readTimeout = 300 * 1000L,
                 coroutineContext = currentCoroutineContext()
             )
-            return analyzeUrl.getResponseAwait().body.byteStream()
+            val response = analyzeUrl.getResponseAwait()
+            HttpTtsResponseValidator.validate(response, httpTts.contentType)
+            return response.body.byteStream()
         }
         return getSpeakStream(httpTts, speakText)
     }
@@ -478,19 +491,7 @@ class HttpReadAloudService : BaseReadAloudService(),
                         throw throwable
                     }
                 }
-                response.headers["Content-Type"]?.let { contentType ->
-                    val contentType = contentType.substringBefore(";")
-                    val ct = httpTts.contentType
-                    if (contentType == "application/json" || contentType.startsWith("text/")) {
-                        throw NoStackTraceException(response.body.string())
-                    } else if (ct?.isNotBlank() == true) {
-                        if (!contentType.matches(ct.toRegex())) {
-                            throw NoStackTraceException(
-                                "TTS服务器返回错误：" + response.body.string()
-                            )
-                        }
-                    }
-                }
+                HttpTtsResponseValidator.validate(response, httpTts.contentType)
                 currentCoroutineContext().ensureActive()
                 response.body.byteStream().let { stream ->
                     downloadErrorNo = 0
@@ -501,6 +502,8 @@ class HttpReadAloudService : BaseReadAloudService(),
             } catch (e: Exception) {
                 when (e) {
                     is CancellationException -> throw e
+                    // 确定的服务拒绝必须暂停并报错，不能播放静音后推进阅读位置。
+                    is HttpTtsResponseException -> throw e
                     is ScriptException, is WrappedException -> {
                         AppLog.put("js错误\n${e.localizedMessage}", e, true)
                         e.printOnDebug()
@@ -526,7 +529,7 @@ class HttpReadAloudService : BaseReadAloudService(),
                             AppLog.put(msg1, e, true)
                             throw e
                         } else {
-                            AppLog.put("TTS下载音频出错，使用无声音频代替。\n朗读文本：$speakText")
+                            AppLog.put("TTS下载音频出错，使用无声音频代替。")
                             // F5/2.14：静默替代不再无感——每次服务会话仅提示一次（防逐句刷 toast），
                             // 告知用户当前段落以静音代替，正向修复日志实锤的 11 次"静默吞错误"
                             if (!silentFallbackToasted) {
@@ -785,7 +788,7 @@ class HttpReadAloudService : BaseReadAloudService(),
 
     override fun onPlayerError(error: PlaybackException) {
         super.onPlayerError(error)
-        AppLog.put("朗读错误\n${contentList[nowSpeak]}", error)
+        AppLog.put("HTTP TTS 朗读错误（HTTP_TTS_PLAYBACK_ERROR）", error)
         deleteCurrentSpeakFile()
         playErrorNo++
         if (playErrorNo >= 5) {
