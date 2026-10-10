@@ -1,5 +1,7 @@
 package io.legado.app.help.readaloud.novel
 
+import io.legado.app.help.readaloud.server.NovelAudioServerException
+
 /**
  * 固定下载入口的面向用户文案。
  *
@@ -31,6 +33,9 @@ internal object NovelAudioPinnedDownloadLabels {
             } else {
                 "已下载 ${state.succeeded} 章"
             }
+
+        is NovelAudioPinnedDownloadPresenter.State.Failed ->
+            NovelAudioServerException(state.reason).localizedMessage.orEmpty()
 
         is NovelAudioPinnedDownloadPresenter.State.Cancelled ->
             "已取消，已下载 ${state.succeeded} 章"

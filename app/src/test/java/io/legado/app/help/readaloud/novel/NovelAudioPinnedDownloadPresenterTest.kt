@@ -284,6 +284,36 @@ class NovelAudioPinnedDownloadPresenterTest {
         }
     }
 
+    @Test
+    fun `busy batch acquisition reports an actionable result without escaping the UI`() = runBlocking {
+        val states = states()
+        val error = io.legado.app.help.readaloud.server.NovelAudioServerException("CONCURRENCY_LIMIT")
+        val presenter = NovelAudioPinnedDownloadPresenter(
+            prepare = { _, _ -> fail("no chapter without a lease"); false },
+            openBatch = { throw error },
+            onState = { states += it }
+        )
+        presenter.start(NovelAudioPinnedRangePolicy.Selection.CurrentChapter, 0, 1)
+        assertEquals("Failed", states.last()::class.java.simpleName)
+        assertEquals(error.localizedMessage, NovelAudioPinnedDownloadLabels.state(states.last()))
+    }
+
+    @Test
+    fun `acquisition cancellation still propagates without a failure result`() = runBlocking {
+        val states = states()
+        val presenter = NovelAudioPinnedDownloadPresenter(
+            prepare = { _, _ -> true },
+            openBatch = { throw CancellationException("cancelled") },
+            onState = { states += it }
+        )
+        try {
+            presenter.start(NovelAudioPinnedRangePolicy.Selection.CurrentChapter, 0, 1)
+            fail("cancellation expected")
+        } catch (_: CancellationException) {
+            assertEquals(1, states.size)
+            assertTrue(states.single() is NovelAudioPinnedDownloadPresenter.State.Running)
+        }
+    }
     private fun states() = Collections.synchronizedList(
         mutableListOf<NovelAudioPinnedDownloadPresenter.State>()
     )

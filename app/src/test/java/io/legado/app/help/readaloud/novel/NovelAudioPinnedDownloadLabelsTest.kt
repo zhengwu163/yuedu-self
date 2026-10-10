@@ -124,4 +124,15 @@ class NovelAudioPinnedDownloadLabelsTest {
         }
         assertTrue(texts.any { it.contains("范围") })
     }
-}
+    @Test
+    fun `batch failure uses the fixed service message without internal codes`() {
+        val text = NovelAudioPinnedDownloadLabels.state(
+            NovelAudioPinnedDownloadPresenter.State.Failed("CONCURRENCY_LIMIT")
+        )
+        assertEquals(
+            io.legado.app.help.readaloud.server.NovelAudioServerException("CONCURRENCY_LIMIT").localizedMessage,
+            text
+        )
+        assertTrue(text.isNotBlank())
+        assertTrue(!text.contains("CONCURRENCY_LIMIT"))
+    }}

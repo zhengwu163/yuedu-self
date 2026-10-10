@@ -81,3 +81,13 @@ Files: build-legado.bat; scripts/test_build_legado_windows.py if portability cha
 - First PINNED attempt failed before plan persistence: NoUnusedVoice. Local catalog has one reserved narrator and two dialogue voices; match excludes the narrator, but Android had matched all three speakers through that endpoint.
 - New regression tests reproduced three Android failures and one Python missing-field error before the fix. Add optional narrator metadata, strictly decode it, and select a flagged narrator from the catalog while preserving old-server matching behavior.
 - After correction: Python 323 tests / zero failures and errors / 19 skips; Android JVM 1117 tests / zero failures and errors / eight host skips. Real generation retry remains pending the updated installation.
+### 2026-10-10 PINNED acquisition follow-up
+
+Real device 10472: selecting PINNED while AUTO synthesis held the lease raised a
+CONCURRENCY_LIMIT server exception from openBatch outside the presenter error boundary.
+The UI coroutine crashed and the cancelled AUTO cleanup left an active lease.
+Two red JVM cases reproduce unhandled acquisition and skipped release in a cancelled job.
+Report acquisition failure using the fixed service-kind message; cancellation still
+propagates. Runtime release runs in NonCancellable IO with its existing 15-second HTTP
+limit, so cancellation does not prevent server cleanup. Never expose response bodies.
+Device retry, cached offline playback and process-restart resume remain required.

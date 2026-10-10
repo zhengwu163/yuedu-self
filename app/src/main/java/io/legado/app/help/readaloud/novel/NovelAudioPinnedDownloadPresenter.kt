@@ -1,6 +1,7 @@
 package io.legado.app.help.readaloud.novel
 
 import java.util.concurrent.atomic.AtomicBoolean
+import io.legado.app.help.readaloud.server.NovelAudioServerException
 import kotlinx.coroutines.CancellationException
 
 /**
@@ -28,6 +29,8 @@ internal class NovelAudioPinnedDownloadPresenter(
         data class Running(val total: Int, val finished: Int) : State
         data class Done(val succeeded: Int, val failed: Int) : State
         data class Cancelled(val succeeded: Int) : State
+        data class Failed(val reason: String) : State
+
         data class Rejected(val reason: NovelAudioPinnedRangePolicy.Rejection) : State
     }
 
@@ -64,7 +67,14 @@ internal class NovelAudioPinnedDownloadPresenter(
         val total = (resolved as NovelAudioPinnedRangePolicy.Result.Resolved).chapters.size
         var finished = 0
         onState(State.Running(total, finished))
-        val batch = openBatch(total)
+        // Acquisition can be rejected while another preparation still owns the lease.
+        // Report the fixed service error instead of crashing the dialog's coroutine.
+        val batch = try {
+            openBatch(total)
+        } catch (error: NovelAudioServerException) {
+            onState(State.Failed(error.kind))
+            return
+        }
         try {
             val downloader = NovelAudioPinnedDownloader(
                 prepare = { chapterIndex, retention ->

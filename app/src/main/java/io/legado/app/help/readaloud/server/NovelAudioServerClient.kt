@@ -7,6 +7,7 @@ import io.legado.app.exception.NoStackTraceException
 import io.legado.app.help.readaloud.novel.NovelAudioBudgetLedger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -169,7 +170,8 @@ class NovelAudioServerClient(
         }
     }
 
-    suspend fun releaseRuntime(leaseId: String) = withContext(Dispatchers.IO) {
+    // A cancelled preparation must still release the server lease; the HTTP deadline remains 15s.
+    suspend fun releaseRuntime(leaseId: String) = withContext(NonCancellable + Dispatchers.IO) {
         checkLease(leaseId)
         try {
             NovelAudioJson.runtimeRelease(

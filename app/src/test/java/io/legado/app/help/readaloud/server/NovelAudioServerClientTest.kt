@@ -4,6 +4,7 @@ import com.google.gson.JsonParser
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -97,6 +98,23 @@ class NovelAudioServerClientTest {
         assertEquals("", requests.last().third)
     }
 
+    @Test fun `cancelled preparation still releases its runtime lease`() = runBlocking {
+        payload = """{"state":"idle"}"""
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val job = launch {
+            try {
+                entered.complete(Unit)
+                kotlinx.coroutines.awaitCancellation()
+            } finally {
+                client.releaseRuntime("lease-cancelled")
+            }
+        }
+        entered.await()
+        job.cancel()
+        job.join()
+        assertEquals(1, requests.count { it.first == "/prefix/v1/runtime/release" })
+        assertEquals("lease-cancelled", leaseHeaders.last())
+    }
     @Test fun `lease is attached to generation requests`() = runBlocking {
         payload = """{"assignments":[{"unitId":"u1","speakerId":"narrator"},{"unitId":"u2","speakerId":"narrator"}],
             "newCharacters":[],"aliasUpdates":[]}"""
