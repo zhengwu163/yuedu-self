@@ -66,10 +66,14 @@ aliasUpdates.characterId 可引用已知或本响应临时 ID。
 ## GET /v1/voices
 
 ```json
-{"voices":[{"voiceAssetId":"M017","displayName":"青年男声","gender":"male","ageRange":"young_adult","traits":["清朗"],"previewAvailable":true}]}
+{"voices":[{"voiceAssetId":"M017","displayName":"青年男声","gender":"male","ageRange":"young_adult","traits":["清朗"],"previewAvailable":true,"narrator":false}]}
 ```
 
-voices 数组及每个元素的上述字段必填，ID 唯一。没有音色可返回空数组。
+`narrator` 为可选布尔字段，省略时按 false 处理。true 标记保留的旁白音色；
+手机为旁白优先从 voices 目录选择这些音色，对白使用 voices/match。
+本地 voices/match 不返回保留旁白，避免旁白占用对白音色；旧服务未声明该字段时保持原匹配行为。
+
+voices 数组及每个元素除 narrator 外的上述字段必填，ID 唯一。没有音色可返回空数组。
 所有元信息为展示/匹配信息，不包含服务器磁盘路径或模型调用字段。
 
 ## POST /v1/voices/match

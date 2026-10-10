@@ -41,7 +41,8 @@ internal object NovelAudioJson {
     fun voices(json: String, key: String): List<VoiceAsset> = decode(json) { root ->
         root.objects(key).map {
             VoiceAsset(it.text("voiceAssetId"), it.text("displayName"), it.text("gender"),
-                it.text("ageRange"), it.strings("traits"), it.bool("previewAvailable"))
+                it.text("ageRange"), it.strings("traits"), it.bool("previewAvailable"),
+                it.optionalBool("narrator") ?: false)
         }.also { require(it.map(VoiceAsset::voiceAssetId).distinct().size == it.size) }
     }
 

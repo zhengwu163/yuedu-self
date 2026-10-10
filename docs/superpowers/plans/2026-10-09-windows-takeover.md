@@ -73,3 +73,11 @@ Files: build-legado.bat; scripts/test_build_legado_windows.py if portability cha
 - Windows playback fixtures use opaque paths; POSIX replacement and unavailable symlink capabilities are explicitly reported as skips. Production credential semantics remain unchanged.
 - build-legado.bat debug and deliver gates PASS. Device APK signature differs from the installed app; no replacement or data clearing was attempted.
 - Device Room schema version and identity match the mainline. Original debug signing key is required to continue M3/M4.
+
+## Real-device follow-up (2026-10-10)
+
+- Original signing key verified; matching debug APK installed with replacement/downgrade flags, without uninstalling or clearing data. GitHub authorization completed and 24031453 pushed.
+- Device Room plan storage and isolated Keystore credential tests: 3 PASS. Phone connection test to the Private LAN endpoint: PASS, 1.2s; configuration encrypted locally.
+- First PINNED attempt failed before plan persistence: NoUnusedVoice. Local catalog has one reserved narrator and two dialogue voices; match excludes the narrator, but Android had matched all three speakers through that endpoint.
+- New regression tests reproduced three Android failures and one Python missing-field error before the fix. Add optional narrator metadata, strictly decode it, and select a flagged narrator from the catalog while preserving old-server matching behavior.
+- After correction: Python 323 tests / zero failures and errors / 19 skips; Android JVM 1117 tests / zero failures and errors / eight host skips. Real generation retry remains pending the updated installation.

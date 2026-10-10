@@ -42,6 +42,7 @@ class VoiceAsset:
             "ageRange": self.age_range,
             "traits": list(self.traits),
             "previewAvailable": self.preview_available,
+            "narrator": self.narrator,
         }
 
 

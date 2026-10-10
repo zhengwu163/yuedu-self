@@ -240,9 +240,10 @@ class ProfileModesTest(unittest.TestCase):
         catalog = self.catalog(referenceText="私有参考文本")
         public = catalog.public_voices(["voice-clone"])[0]
         self.assertEqual(
-            {"voiceAssetId", "displayName", "gender", "ageRange", "traits", "previewAvailable"},
+            {"voiceAssetId", "displayName", "gender", "ageRange", "traits", "previewAvailable", "narrator"},
             set(public),
         )
+        self.assertIsInstance(public["narrator"], bool)
         self.assertNotIn("私有参考文本", json.dumps(public, ensure_ascii=False))
         self.assertNotIn(str(self.root), json.dumps(public))
 

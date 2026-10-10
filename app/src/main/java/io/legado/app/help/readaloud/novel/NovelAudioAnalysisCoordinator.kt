@@ -148,11 +148,16 @@ class NovelAudioAnalysisCoordinator(
     ): Map<Long, NovelAudioVoiceBinding> {
         if (voices == null && match == null) return emptyMap()
         val allVoices = voices?.invoke().orEmpty()
+        val narratorVoices = allVoices.filter { it.narrator }
         val result = mutableMapOf<Long, NovelAudioVoiceBinding>()
         val orderedSpeakers = listOf(0L) + speakerIds.filter { it != 0L }
         orderedSpeakers.forEach { speakerId ->
             val existing = existingBindings + result.values
-            val candidates = if (match != null) {
+            // Local match deliberately excludes reserved narrator assets; do not consume a dialogue voice.
+            // An older server without this optional metadata keeps its existing matching behavior.
+            val candidates = if (speakerId == 0L && narratorVoices.isNotEmpty()) {
+                narratorVoices
+            } else if (match != null) {
                 match.invoke(
                     VoiceMatchRequest(
                         voicePersona = VoicePersona(),

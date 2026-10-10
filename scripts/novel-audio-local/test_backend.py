@@ -311,6 +311,14 @@ class LocalBackendTest(unittest.TestCase):
             catalog.contains("local.qwen3-tts.narrator", ["voice-design"])
         )
 
+    def test_public_catalog_marks_reserved_narrator_for_phone_binding(self):
+        catalog = VoiceCatalog(ROOT / "voices" / "standard.json")
+        voices = catalog.public_voices(["voice-design"])
+        self.assertEqual(1, sum(item["narrator"] for item in voices))
+        self.assertTrue(all(isinstance(item["narrator"], bool) for item in voices))
+        matched = catalog.match({"traits": []}, [], capabilities=["voice-design"])
+        self.assertTrue(all(not item["narrator"] for item in matched))
+
     def test_voice_catalog_filters_assets_by_active_capabilities(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -90,7 +90,8 @@ data class VoiceAsset(
     val gender: String = "",
     val ageRange: String = "",
     val traits: List<String> = emptyList(),
-    val previewAvailable: Boolean = false
+    val previewAvailable: Boolean = false,
+    val narrator: Boolean = false
 )
 
 @Keep
