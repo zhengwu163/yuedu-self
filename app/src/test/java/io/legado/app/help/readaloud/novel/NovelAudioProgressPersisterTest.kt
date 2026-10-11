@@ -16,6 +16,17 @@ class NovelAudioProgressPersisterTest {
 
     private val book = "https://example.test/book"
 
+    @Test fun `explicit backwards navigation discards pending old progress and resumes persistence`() {
+        val writes = writes()
+        val persister = persister(writes)
+        persister.onProgress(book, 3, 300, atMillis = 1_000L)
+        persister.onProgress(book, 3, 340, atMillis = 2_000L)
+        persister.onNavigation(book, 3, 0, 3_000L)
+        persister.onProgress(book, 3, 40, atMillis = 4_000L)
+        persister.flush()
+        assertEquals(listOf(Triple(book, 3, 300), Triple(book, 3, 0), Triple(book, 3, 40)), writes)
+    }
+
     @Test
     fun `the first progress of a chapter is written immediately`() {
         val writes = writes()

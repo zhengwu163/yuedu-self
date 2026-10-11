@@ -147,8 +147,74 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 }
                 return super.onStartCommand(null, flags, startId)
             }
+
+            IntentAction.moveTo -> {
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { work ->
+                    navigateFrozenChapter(
+                        intent.getIntExtra("expectedChapterIndex", ReadBook.durChapterIndex),
+                        intent.getIntExtra("chapterPosition", 0),
+                        intent.getBooleanExtra("play", BaseReadAloudService.isPlay()), work
+                    )
+                }
+                return super.onStartCommand(null, flags, startId)
+            }
+
+            IntentAction.playFromPosition -> {
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { work ->
+                    navigateFrozenChapter(
+                        intent.getIntExtra("chapterIndex", ReadBook.durChapterIndex),
+                        intent.getIntExtra("chapterPosition", 0), true, work
+                    )
+                }
+                return super.onStartCommand(null, flags, startId)
+            }
+
+            IntentAction.selectChapter -> {
+                dispatchPlayback(
+                    intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
+                    intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION), flags
+                ) { work ->
+                    navigateFrozenChapter(
+                        intent.getIntExtra("chapterIndex", ReadBook.durChapterIndex), 0,
+                        intent.getBooleanExtra("continuePlayback", BaseReadAloudService.isPlay()), work
+                    )
+                }
+                return super.onStartCommand(null, flags, startId)
+            }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    /** Legacy text assembly clears this service's frozen player and cannot rebuild it. */
+    private fun navigateFrozenChapter(
+        chapterIndex: Int, chapterPosition: Int, play: Boolean,
+        work: AudioPrefetchLifecycle.Work?
+    ) {
+        val bookUrl = ReadBook.book?.bookUrl ?: return
+        if (chapterIndex < 0 || chapterIndex >= ReadBook.chapterSize) return
+        if (work != null && !AudioPrefetchPlayback.lifecycle.isCurrent(work)) return
+        prepareJob?.cancel()
+        playStop()
+        val position = chapterPosition.coerceAtLeast(0)
+        fun navigate() {
+            // A late chapter load must not move a newer selection or another book.
+            if (ReadBook.book?.bookUrl != bookUrl || ReadBook.durChapterIndex != chapterIndex ||
+                (work != null && !AudioPrefetchPlayback.lifecycle.isCurrent(work))
+            ) return
+            progressPersister.onNavigation(bookUrl, chapterIndex, position, System.currentTimeMillis())
+            prepareAndPlay(work, playAfterPreparation = play)
+        }
+        if (chapterIndex == ReadBook.durChapterIndex) {
+            navigate()
+        } else {
+            ReadBook.openChapter(chapterIndex, durChapterPos = position, success = ::navigate)
+        }
     }
 
     override fun play() {
@@ -251,7 +317,10 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         pauseReadAloud()
     }
 
-    private fun prepareAndPlay(work: AudioPrefetchLifecycle.Work?, readyPlanId: String? = null) {
+    private fun prepareAndPlay(
+        work: AudioPrefetchLifecycle.Work?, readyPlanId: String? = null,
+        playAfterPreparation: Boolean = true
+    ) {
         if (work != null &&
             !AudioPrefetchPlayback.lifecycle.isCurrent(work)
         ) return
@@ -315,20 +384,22 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                         currentSegmentIndex,
                         0L
                     )
-                    val chapterCount = ReadBook.curTextChapter?.chaptersSize ?: (ReadBook.durChapterIndex + 1)
-                    prefetchAssembled(
-                        work = work,
-                        bookUrl = result.plan.physicalBookUrl,
-                        chapterIndex = result.plan.chapterIndex,
-                        chapterCount = chapterCount
-                    )
-                    // 窗口由 prefetchAssembled 更新，驱动必须排在其后才能拿到非空窗口。
-                    NovelAudioAutoPrefetchDriver.onChapterReady(
-                        work = work,
-                        bookUrl = result.plan.physicalBookUrl,
-                        chapterIndex = result.plan.chapterIndex
-                    )
-                    play()
+                    if (playAfterPreparation) {
+                        val chapterCount = ReadBook.curTextChapter?.chaptersSize ?: (ReadBook.durChapterIndex + 1)
+                        prefetchAssembled(
+                            work = work,
+                            bookUrl = result.plan.physicalBookUrl,
+                            chapterIndex = result.plan.chapterIndex,
+                            chapterCount = chapterCount
+                        )
+                        // 窗口由 prefetchAssembled 更新，驱动必须排在其后才能拿到非空窗口。
+                        NovelAudioAutoPrefetchDriver.onChapterReady(
+                            work = work,
+                            bookUrl = result.plan.physicalBookUrl,
+                            chapterIndex = result.plan.chapterIndex
+                        )
+                    }
+                    if (playAfterPreparation) play() else pauseReadAloud()
                 }
 
                 is PlaybackPreparation.Blocked -> {
@@ -343,6 +414,12 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                     if (result.reason == BlockReason.MISSING_PLAN ||
                         result.reason == BlockReason.PLAN_NOT_READY
                     ) {
+                        if (!playAfterPreparation) {
+                            // Selecting while paused does not authorize generation or a waiting spinner.
+                            pendingPreparationWork = null
+                            pauseReadAloud()
+                            return@onSuccess
+                        }
                         val hasWork = work != null &&
                             AudioPrefetchPlayback.lifecycle.isCurrent(work)
                         if (hasWork) {

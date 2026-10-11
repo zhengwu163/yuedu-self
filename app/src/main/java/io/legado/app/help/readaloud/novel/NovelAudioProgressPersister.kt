@@ -7,8 +7,8 @@ package io.legado.app.help.readaloud.novel
  * 因此用时间窗节流。以下三种情况必须立即写入，不能被窗口吞掉：
  * 换章、换书、停止——它们都意味着当前位置不会再有后续事件来补写。
  *
- * 同章位置回退不写：这类事件通常来自迟到的段进度回调，
- * 写回更早的位置会让用户下次续播退回已听过的内容。
+ * 普通进度回退不写，避免迟到回调覆盖位置。用户主动定位使用 onNavigation，
+ * 立即保存新起点并丢弃旧待写进度，允许后续从更早的位置续听。
  */
 class NovelAudioProgressPersister(
     private val write: (bookUrl: String, chapterIndex: Int, chapterPosition: Int) -> Unit
@@ -23,6 +23,13 @@ class NovelAudioProgressPersister(
     private var lastWritten: Position? = null
     private var pending: Position? = null
     private var lastWriteAtMillis = 0L
+
+    /** Explicit navigation starts a new progress interval, including a backwards seek. */
+    @Synchronized
+    fun onNavigation(bookUrl: String, chapterIndex: Int, chapterPosition: Int, atMillis: Long) {
+        if (bookUrl.isBlank() || chapterIndex < 0 || chapterPosition < 0) return
+        commit(Position(bookUrl, chapterIndex, chapterPosition), atMillis)
+    }
 
     @Synchronized
     fun onProgress(

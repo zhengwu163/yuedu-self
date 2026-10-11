@@ -11,6 +11,45 @@ class NovelAudioTakeoverRegressionTest {
 
     private fun source(path: String) = File(root, "io/legado/app/$path").readText()
 
+    @Test fun frozenPlayerOwnsSeekAndChapterSelection() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val dispatch = service.substringAfter("override fun onStartCommand")
+            .substringBefore("override fun play()")
+        for (action in listOf("moveTo", "playFromPosition", "selectChapter")) {
+            assertTrue("Frozen audio navigation must not fall through to legacy text assembly: $action",
+                dispatch.contains("IntentAction.$action ->"))
+        }
+        val navigation = service.substringAfter("private fun navigateFrozenChapter")
+            .substringBefore("override fun play()")
+        assertTrue(navigation.contains("prepareAndPlay(") && !navigation.contains("newReadAloud"))
+    }
+
+    @Test fun pausedFrozenNavigationPreparesWithoutStartingSpeech() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val preparation = service.substringAfter("private fun prepareAndPlay")
+            .substringBefore("private fun requestContinuationPreparation")
+        assertTrue("A paused seek must stay paused after the ready files are reloaded",
+            preparation.contains("playAfterPreparation: Boolean") &&
+                preparation.contains("if (playAfterPreparation) play() else pauseReadAloud()"))
+    }
+
+    @Test fun selectingAnUnpreparedChapterWhilePausedDoesNotWaitForGeneration() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val missingPlan = service.substringAfter("if (result.reason == BlockReason.MISSING_PLAN ||")
+            .substringBefore("val hasWork =")
+        assertTrue("Paused chapter selection must settle as paused instead of leaving a loading spinner",
+            missingPlan.contains("if (!playAfterPreparation)") && missingPlan.contains("pauseReadAloud()"))
+    }
+
+    @Test fun staleFrozenNavigationDoesNotMoveAnotherBook() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val navigation = service.substringAfter("private fun navigateFrozenChapter")
+            .substringBefore("override fun play()")
+        assertTrue("Late chapter callbacks must verify the book and playback work before changing progress",
+            navigation.contains("ReadBook.book?.bookUrl != bookUrl") &&
+                navigation.contains("AudioPrefetchPlayback.lifecycle.isCurrent(work)"))
+    }
+
     @Test
     fun novelPlayerBubblesUseTheSameFrozenPlanAsItsAudio() {
         val panel = source("ui/book/read/ReadAloudPlayerPanel.kt")
