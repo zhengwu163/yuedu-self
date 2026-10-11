@@ -45,4 +45,16 @@ class HttpReadAloudResponseWiringTest {
         assertTrue("队列必须将固定拒绝传给主线程提示，而不能静默返回",
             caught.contains("if (e is HttpTtsResponseException) throw e"))
     }
+
+    @Test fun `retry after provider rejection rebuilds the download queue`() {
+        val report = source.substringAfter("private fun reportDownloadError(")
+            .substringBefore("private suspend fun")
+        val invalidate = report.indexOf("pageChanged = true")
+        assertTrue("拒绝后再次播放必须重建下载队列，不能恢复空播放器",
+            invalidate >= 0 && invalidate < report.indexOf("pauseReadAloud()"))
+        val resume = source.substringAfter("override fun resumeReadAloud()")
+            .substringBefore("private fun upPlayPos()")
+        assertTrue(resume.contains("if (pageChanged)"))
+        assertTrue(resume.indexOf("play()") < resume.indexOf("exoPlayer.play()"))
+    }
 }

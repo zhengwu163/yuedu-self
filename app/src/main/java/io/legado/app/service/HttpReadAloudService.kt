@@ -201,6 +201,8 @@ class HttpReadAloudService : BaseReadAloudService(),
     private fun reportDownloadError(error: Throwable) {
         if (error is HttpTtsResponseException) {
             // 下载在后台进行；拒绝后同步暂停媒体状态，不能继续显示播放或跳过缺失段落。
+            // 再次播放必须重建下载队列，不能仅恢复没有可用音频的播放器。
+            pageChanged = true
             pauseReadAloud()
             toastOnUi(error.localizedMessage.orEmpty())
         }

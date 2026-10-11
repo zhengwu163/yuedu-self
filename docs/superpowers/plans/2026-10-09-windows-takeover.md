@@ -155,3 +155,19 @@ client is created; actual offline restart needs another signed device delivery.
   zero failures/errors, 19 skipped. Real text-only analysis passed in 1.9s;
   real Agent path passed acquire 20.1s, analyze 6.8s, release 0.6s, seven units
   covered and two new characters. Device multi-chapter acceptance follows.
+
+### 2026-10-11 connected batch and retry follow-up
+
+- Actual six-chapter PINNED batch passed on the signed 10476 test package: all
+  six plans READY, 66 decoded artifacts, three speakers, maximum spoken length
+  48 characters. Per-chapter generation 86.7-101.2s; first artifact after plan
+  creation 16.8-23.8s. GPU returned to 18 MiB after release.
+- With airplane enabled and Wi-Fi disabled, playback crossed chapter boundaries
+  and reading positions advanced. Force-stop preserved data; the reopened test
+  package resumed playback state within 0.6s and crossed another chapter.
+- Real nine-endpoint service smoke passed after the schema fix in 213.7s.
+- Device regression found HTTP rejection paused initially, but manual retry
+  changed media state to PLAYING without a new request (401 count stayed five).
+  Mark the page dirty before pausing so resume rebuilds the download queue.
+  Red wiring test: seven tests, one failure. Full JVM green: 1145 tests,
+  zero failures/errors, eight skipped. Signed replacement/device retry follows.
