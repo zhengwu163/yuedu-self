@@ -15,6 +15,7 @@ import io.legado.app.data.appDb
 import io.legado.app.data.entities.Book
 import io.legado.app.data.entities.BookCharacter
 import io.legado.app.help.character.BookCharacterIdentityMigrator
+import io.legado.app.help.readaloud.novel.NovelAudioCharacterScope
 import io.legado.app.help.readaloud.ReadAloudConfigChangeNotifier
 import io.legado.app.ui.widget.compose.showComposeConfirmDialog
 import io.legado.app.model.ReadBook
@@ -77,7 +78,10 @@ class BookCharacterManageActivity : BaseActivity<ViewBinding>(
         }
         lifecycleScope.launch {
             val data = withContext(IO) {
-                val key = BookCharacterIdentityMigrator.migrate(book)
+                BookCharacterIdentityMigrator.migrate(book)
+                val key = NovelAudioCharacterScope.forManagement(
+                    book, intent.getStringExtra(EXTRA_CHARACTER_BOOK_KEY)
+                )
                 key to appDb.bookCharacterDao.characters(key)
             }
             characterBookKey = data.first

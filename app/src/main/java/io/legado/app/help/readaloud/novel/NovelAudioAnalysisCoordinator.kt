@@ -11,6 +11,7 @@ import io.legado.app.help.readaloud.server.NewCharacter
 import io.legado.app.help.readaloud.server.PreviousContext
 import io.legado.app.help.readaloud.server.SpeakerAssignment
 import io.legado.app.help.readaloud.server.VoiceAsset
+import io.legado.app.help.readaloud.server.VoiceConstraints
 import io.legado.app.help.readaloud.server.VoiceMatchRequest
 import io.legado.app.help.readaloud.server.VoicePersona
 
@@ -122,7 +123,8 @@ class NovelAudioAnalysisCoordinator(
         val bindings = bindVoices(
             scope = scope,
             speakerIds = assignmentByUnit.values.mapNotNull { it.toLongOrNull() }.distinct(),
-            existingBindings = existingBindings
+            existingBindings = existingBindings,
+            characters = knownCharacters.associateBy { it.id }
         )
         val normalizedUnits = parsedUnits.map { unit ->
             unit.copy(characterName = assignmentByUnit[unit.unitId].orEmpty())
@@ -144,7 +146,8 @@ class NovelAudioAnalysisCoordinator(
     private suspend fun bindVoices(
         scope: String,
         speakerIds: List<Long>,
-        existingBindings: List<NovelAudioVoiceBinding>
+        existingBindings: List<NovelAudioVoiceBinding>,
+        characters: Map<Long, BookCharacter>
     ): Map<Long, NovelAudioVoiceBinding> {
         if (voices == null && match == null) return emptyMap()
         val allVoices = voices?.invoke().orEmpty()
@@ -161,7 +164,10 @@ class NovelAudioAnalysisCoordinator(
                 match.invoke(
                     VoiceMatchRequest(
                         voicePersona = VoicePersona(),
-                        alreadyUsedVoiceIds = existing.map { it.voiceAssetId }.distinct()
+                        alreadyUsedVoiceIds = existing.map { it.voiceAssetId }.distinct(),
+                        optionalConstraints = VoiceConstraints(
+                            gender = BookCharacter.normalizeGender(characters[speakerId]?.gender)
+                        )
                     )
                 )
             } else {

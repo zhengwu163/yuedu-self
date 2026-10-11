@@ -136,6 +136,7 @@ import io.legado.app.help.ai.AiReadAloudRolePreviewSegment
 import io.legado.app.help.ai.AiReadAloudRoleState
 import io.legado.app.help.book.characterBookKey
 import io.legado.app.help.character.BookCharacterIdentityMigrator
+import io.legado.app.help.readaloud.novel.NovelAudioCharacterScope
 import io.legado.app.help.CoverDisplayResolver
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.readaloud.casting.TtsCastingStore
@@ -1165,6 +1166,7 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
     private fun buildChapterModel(): PlayerChapterModel? {
         val book = ReadBook.book ?: return null
         val chapter = ReadBook.curTextChapter ?: return null
+        BookCharacterIdentityMigrator.migrate(book)
         val chapterSequence = chapter.chapter.index
         val readAloudByPage = context.getPrefBoolean(PreferKey.readAloudByPage)
         val paragraphs = chapter.getParagraphs(false)
@@ -1201,6 +1203,9 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             append(':')
             append(baseCues.sumOf { it.text.length })
         }
+        val characterPreview = buildCharacterPreview(
+            NovelAudioCharacterScope.key(book, ReadAloud.ttsEngine)
+        )
         val modelKey = listOf(
             book.bookUrl,
             book.name,
@@ -1214,6 +1219,8 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             ReadBook.chapterSize.toString(),
             readAloudByPage.toString(),
             multiRoleEnabled.toString(),
+            ReadAloud.ttsEngine.orEmpty(),
+            characterPreview.hashCode().toString(),
             cueFingerprint,
             roleCacheKey.orEmpty(),
             roleCache?.status.orEmpty(),
@@ -1270,9 +1277,7 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             roleCacheReady = roleCacheReady,
             roleCacheRunning = roleCacheRunning,
             chapterPreview = buildChapterPreview(book.bookUrl, chapterSequence, ReadBook.chapterSize),
-            characterPreview = buildCharacterPreview(
-                BookCharacterIdentityMigrator.migrate(book).ifBlank { book.characterBookKey() }
-            ),
+            characterPreview = characterPreview,
             audioInfo = audioInfo
         ).also {
             chapterModelCache = it
@@ -3266,7 +3271,7 @@ private fun RoleSegmentEditDialog(
     PlayerBackHandler(enabled = true, onBack = onDismiss)
     val characters by produceState<List<BookCharacter>>(initialValue = emptyList(), state.bookName, state.author) {
         value = withContext(Dispatchers.IO) {
-            val bookKey = ReadBook.book?.characterBookKey().orEmpty()
+            val bookKey = NovelAudioCharacterScope.key(ReadBook.book, ReadAloud.ttsEngine)
             if (bookKey.isBlank()) emptyList() else appDb.bookCharacterDao.characters(bookKey)
         }
     }

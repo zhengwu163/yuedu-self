@@ -101,6 +101,7 @@ import io.legado.app.help.config.ThemeConfig
 import io.legado.app.help.coroutine.Coroutine
 import io.legado.app.help.readaloud.ReadAloudPlaybackState
 import io.legado.app.help.readaloud.ReadAloudProgressState
+import io.legado.app.help.readaloud.novel.NovelAudioCharacterScope
 import io.legado.app.help.source.getSourceType
 import io.legado.app.help.storage.Backup
 import io.legado.app.lib.dialogs.SelectItem
@@ -3581,6 +3582,8 @@ class ReadBookActivity : BaseReadBookActivity(),
         }
         startActivity<BookCharacterManageActivity> {
             putExtra(BookCharacterManageActivity.EXTRA_BOOK_URL, book.bookUrl)
+            putExtra(BookCharacterManageActivity.EXTRA_CHARACTER_BOOK_KEY,
+                NovelAudioCharacterScope.key(book, ReadAloud.ttsEngine))
         }
     }
 

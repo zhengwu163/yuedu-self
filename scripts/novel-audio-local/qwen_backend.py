@@ -356,6 +356,7 @@ class QwenTtsAdapter:
         self.model_loader = model_loader
         self.audio_encoder = audio_encoder or encode_ogg_opus
         self.model = None
+        self.clone_prompts = {}
         self.closed = False
         self.last_operation = None
 
@@ -469,12 +470,19 @@ class QwenTtsAdapter:
                     language=operation["language"],
                 )
             else:
+                # Freeze the reference features for this loaded model. VoiceDesign
+                # references are prepared once; paragraphs never redesign a speaker.
+                key = (operation["refAudio"], operation["refText"], operation["xVectorOnlyMode"])
+                if key not in self.clone_prompts:
+                    self.clone_prompts[key] = model.create_voice_clone_prompt(
+                        ref_audio=operation["refAudio"],
+                        ref_text=operation["refText"],
+                        x_vector_only_mode=operation["xVectorOnlyMode"],
+                    )
                 waveform = model.generate_voice_clone(
                     text=operation["text"],
                     language=operation["language"],
-                    ref_audio=operation["refAudio"],
-                    ref_text=operation["refText"],
-                    x_vector_only_mode=operation["xVectorOnlyMode"],
+                    voice_clone_prompt=self.clone_prompts[key],
                 )
             return waveform
         except Exception:
@@ -484,6 +492,7 @@ class QwenTtsAdapter:
         if self.closed:
             return
         self.closed = True
+        self.clone_prompts.clear()
         model, self.model = self.model, None
         if model is None:
             return

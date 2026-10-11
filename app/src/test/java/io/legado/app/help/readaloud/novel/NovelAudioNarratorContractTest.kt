@@ -51,11 +51,13 @@ class NovelAudioNarratorContractTest {
                 text, true, 1.0, "test")
         }
         var matchCalls = 0
+        val matchedGenders = mutableListOf<String>()
         val coordinator = NovelAudioAnalysisCoordinator(
             registry = CharacterRegistry(MemoryCharacterStore()),
             voices = { catalog },
             match = { request ->
                 matchCalls++
+                matchedGenders += request.optionalConstraints?.gender.orEmpty()
                 catalog.filter { it.voiceAssetId != "n" }
                     .sortedBy { it.voiceAssetId in request.alreadyUsedVoiceIds }
             },
@@ -63,7 +65,8 @@ class NovelAudioNarratorContractTest {
                 ChapterAnalysisResponse(
                     assignments = listOf(SpeakerAssignment("u0", "narrator"),
                         SpeakerAssignment("u1", "tmp-a"), SpeakerAssignment("u2", "tmp-b")),
-                    newCharacters = listOf(NewCharacter("tmp-a", "sample-a"), NewCharacter("tmp-b", "sample-b"))
+                    newCharacters = listOf(NewCharacter("tmp-a", "sample-a", gender = "male"),
+                        NewCharacter("tmp-b", "sample-b", gender = "female"))
                 )
             }
         )
@@ -71,5 +74,6 @@ class NovelAudioNarratorContractTest {
         assertEquals("n", plan.segments.first().voiceAssetId)
         assertEquals(setOf("a", "b", "n"), plan.segments.map { it.voiceAssetId }.toSet())
         assertEquals(2, matchCalls)
+        assertEquals(listOf("male", "female"), matchedGenders)
     }
 }

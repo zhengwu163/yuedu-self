@@ -292,14 +292,33 @@ class ProfileModesTest(unittest.TestCase):
                 loader.assert_called_once_with(str(self.root / capability))
                 kwargs = getattr(model, method).call_args.kwargs
                 if capability == "voice-clone":
-                    self.assertEqual({"text", "language", "ref_audio", "ref_text", "x_vector_only_mode"}, set(kwargs))
-                    self.assertEqual(str(self.reference), kwargs["ref_audio"])
-                    self.assertIsNone(kwargs["ref_text"])
-                    self.assertIs(True, kwargs["x_vector_only_mode"])
+                    self.assertEqual({"text", "language", "voice_clone_prompt"}, set(kwargs))
+                    self.assertIs(model.create_voice_clone_prompt.return_value, kwargs["voice_clone_prompt"])
+                    model.create_voice_clone_prompt.assert_called_once_with(
+                        ref_audio=str(self.reference), ref_text=None, x_vector_only_mode=True,
+                    )
                     model.generate_voice_design.assert_not_called()
                 else:
                     self.assertEqual({"text", "language", "instruct"}, set(kwargs))
                     model.generate_voice_clone.assert_not_called()
+
+    def test_clone_prompt_is_reused_per_reference_and_cleared_on_close(self):
+        model = Mock()
+        prompts = [object(), object(), object()]
+        model.create_voice_clone_prompt.side_effect = prompts
+        adapter = QwenTtsAdapter(object(), self.catalog(), profile=self.profile("voice-clone"),
+                                 model_loader=Mock(return_value=model))
+        first = adapter.build_operation(self.request())
+        adapter._invoke(first)
+        adapter._invoke(dict(first, text="different paragraph"))
+        second = dict(first, refAudio=str(self.root / "second.wav"))
+        adapter._invoke(second)
+        adapter._invoke(dict(first, refText="reference transcript", xVectorOnlyMode=False))
+        self.assertEqual(3, model.create_voice_clone_prompt.call_count)
+        self.assertEqual([prompts[0], prompts[0], prompts[1], prompts[2]],
+                         [call.kwargs["voice_clone_prompt"] for call in model.generate_voice_clone.call_args_list])
+        adapter.close()
+        self.assertEqual({}, adapter.clone_prompts)
 
     def test_reference_text_enables_transcript_mode_but_whitespace_does_not(self):
         for text, expected in (("", None), (" \n\t ", None), ("参考台词", "参考台词")):
