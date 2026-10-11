@@ -190,10 +190,11 @@ class PageView(context: Context) : FrameLayout(context) {
      * 显示状态栏时隐藏header
      */
     fun upStatusBar() = with(binding.vwStatusBar) {
-//        setPadding(paddingLeft, context.statusBarHeight, paddingRight, paddingBottom)
-        isGone = ReadBook.book?.isEpub == true ||
-            ReadBookConfig.hideStatusBar ||
+        // EPUB also needs this inset: some phones report a camera only as status-bar space.
+        isGone = ReadBookConfig.hideStatusBar ||
             readBookActivity?.isInMultiWindow == true
+        // Recalculate root cutout padding so it cannot duplicate the newly visible spacer.
+        ViewCompat.requestApplyInsets(binding.vwRoot)
     }
 
     fun upNavigationBar() {

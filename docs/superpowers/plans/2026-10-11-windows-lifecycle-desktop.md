@@ -53,7 +53,7 @@ Verification sequence:
   five chapters spanned 284.3 seconds including intervening loading/cleanup.
   Current-process BUSY, release failure, startup cleanup failure and plan/audio
   decode failure counts were zero. Final runtime idle, no active lease.
-- [ ] Scan secrets, run pre-commit gates, commit/push, build/verify source ZIP and
+- [x] Scan secrets, run pre-commit gates, commit/push, build/verify source ZIP and
   retain a checked unified patch and private measurements.
 
 Observed short-fixture timings before handoff fix: current PINNED chapter
@@ -75,3 +75,25 @@ uses each chapter's new READY plan, without deleting user data.
 
 Real login startup is NOT_TESTED: registering and natively executing the exact
 Run command passed, but this task did not log off the user's Windows session.
+
+Follow-up: GitHub transport recovered and b63efe48 was pushed and independently
+verified. The user chose local-only acceptance for this round, so live online
+provider/key testing remains outside this round. Full runtime onboarding is
+future productization; the checked ZIP is accurately described as a source bundle.
+
+Reader regression: on the connected phone the visible status bar is 161 pixels
+high, while the display-cutout inset is zero. The legacy EPUB page excluded its
+system-bar spacer by format, so enabling cutout padding alone did not move text.
+Remove that format exclusion while retaining explicit fullscreen/multiwindow
+rules. New source-contract regression ran RED (2 tests / 1 failure), then the
+full JVM suite passed 1156 tests, zero failures/errors, 8 skips. Replacement
+installation on the actual phone moved the content top from 0 to 161 pixels.
+Testing the hide/show setting exposed stale cutout padding: restoring the spacer
+temporarily doubled top space to 322 pixels, while reopening restored 161.
+Add a fresh inset request after spacer visibility changes. The additional
+regression ran RED (3 tests / 1 failure), then the full suite passed 1157 tests,
+zero failures/errors, 8 skips. Updated original-signature debug APK replacement
+installed without clearing data. Native hide/show switching now retains a
+161-pixel content top instead of duplicating to 322; force-stop/reopen also
+retains 161. Final settings show the status bar and enable cutout padding.
+Only the test package was operated; the separate formal package is untouched.
