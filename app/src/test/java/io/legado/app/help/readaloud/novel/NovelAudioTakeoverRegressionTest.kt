@@ -34,10 +34,12 @@ class NovelAudioTakeoverRegressionTest {
     @Test
     fun downloadFailurePreservesTheSafeServerKindForDiagnosis() {
         val coordinator = source("help/readaloud/offline/NovelAudioDownloadCoordinator.kt")
+        val returnsSafeReason = coordinator.contains("Result.Failed(downloadFailureReason(error))") ||
+            (coordinator.contains("val reason = downloadFailureReason(error)") &&
+                coordinator.contains("Result.Failed(reason)"))
         assertTrue(
             "A class name alone hides RESOURCE/TIMEOUT diagnosis from callers",
-            coordinator.contains("Result.Failed(downloadFailureReason(error))") &&
-                coordinator.contains("error.kind")
+            returnsSafeReason && coordinator.contains("error.kind")
         )
     }
 }

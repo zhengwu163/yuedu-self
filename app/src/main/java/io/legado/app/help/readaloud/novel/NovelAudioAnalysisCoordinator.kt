@@ -132,7 +132,7 @@ class NovelAudioAnalysisCoordinator(
         val speakerIds = normalizedUnits.associate { unit ->
             unit.unitId to (assignmentByUnit[unit.unitId]?.toLongOrNull() ?: 0L)
         }
-        return NovelAudioPlanFactory.create(
+        val plan = NovelAudioPlanFactory.create(
             snapshot = snapshot,
             serverScope = scope,
             generation = generation,
@@ -141,6 +141,8 @@ class NovelAudioAnalysisCoordinator(
             voiceBindings = bindings,
             maxSegmentChars = maxSegmentChars
         )
+        registry?.rememberVoiceBindings(bindings.values.toList())
+        return plan
     }
 
     private suspend fun bindVoices(

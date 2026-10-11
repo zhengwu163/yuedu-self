@@ -76,4 +76,37 @@ class NovelAudioNarratorContractTest {
         assertEquals(2, matchCalls)
         assertEquals(listOf("male", "female"), matchedGenders)
     }
+
+    @Test fun `role bindings survive the next chapter with reversed speaker order`() = runBlocking {
+        val store = MemoryCharacterStore()
+        val registry = CharacterRegistry(store)
+        fun snapshot(index: Int) = NovelAudioChapterSnapshotFactory.fromStrings(
+            bookUrl = "book://stable-roles", chapterIndex = index, chapterUrl = "chapter-$index",
+            strings = listOf("sample first", "sample second"),
+            rules = ReadAloudPreprocessRuleConfig().freeze()
+        )
+        val first = snapshot(0)
+        val roles = registry.resolve(first.workKey, listOf(
+            NewCharacter("tmp-a", "sample-a"), NewCharacter("tmp-b", "sample-b")
+        )).created
+        val catalog = listOf(VoiceAsset(voiceAssetId = "n", narrator = true),
+            VoiceAsset(voiceAssetId = "a"), VoiceAsset(voiceAssetId = "b"))
+        var order = roles
+        val coordinator = NovelAudioAnalysisCoordinator(
+            registry = registry, voices = { catalog },
+            match = { request -> catalog.filter { !it.narrator }
+                .sortedBy { it.voiceAssetId in request.alreadyUsedVoiceIds } },
+            analyze = { request -> ChapterAnalysisResponse(assignments =
+                request.units.mapIndexed { index, unit ->
+                    SpeakerAssignment(unit.unitId, order[index].id.toString())
+                }) }
+        )
+        val plan = coordinator.analyze(first, "scope", existingCharacters = roles)
+        val original = plan.segments.associate { it.speakerId to it.voiceAssetId }
+        assertEquals(3, store.voiceBindings("scope").size)
+        order = roles.reversed()
+        val next = coordinator.analyze(snapshot(1), "scope", existingCharacters = roles,
+            existingBindings = store.voiceBindings("scope").map { it.toDomain() })
+        assertEquals(original, next.segments.associate { it.speakerId to it.voiceAssetId })
+    }
 }

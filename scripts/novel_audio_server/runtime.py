@@ -5,7 +5,7 @@ import queue
 import secrets
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 from .errors import (
@@ -211,6 +211,9 @@ class RuntimeManager:
                 raise LeaseError()
             if self._active_requests:
                 raise ServiceBusyError()
+            # A chapter may take longer than one TTL. Renew on real activity,
+            # while the watchdog still bounds an abandoned or stuck request.
+            self._lease = replace(self._lease, expires_at=self._clock() + self._lease_ttl)
             self._active_requests = 1
             self._state = RuntimeState.GENERATING
             return self._worker
@@ -227,6 +230,7 @@ class RuntimeManager:
             if self._active_requests != 1:
                 raise LeaseError()
             self._active_requests = 0
+            self._lease = replace(self._lease, expires_at=self._clock() + self._lease_ttl)
             self._state = RuntimeState.READY
 
     def release(self, lease_id):

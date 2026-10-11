@@ -402,8 +402,18 @@ class NovelAudioRepository(
     }
 
     fun currentPlan(physicalBookUrl: String, chapterIndex: Int): NovelAudioChapterPlan? {
-        return dao.currentChapterPlan(physicalBookUrl, chapterIndex)
-            ?.let { NovelAudioPlanJson.decode(it.planJson) }
+        val entity = dao.currentChapterPlan(physicalBookUrl, chapterIndex) ?: return null
+        val plan = NovelAudioPlanJson.decode(entity.planJson) ?: return null
+        if (entity.state == NovelAudioStates.READY) {
+            // Upgrade existing audio without regenerating it or replacing a later manual binding.
+            CharacterRegistry(NovelAudioRoomCharacterStore(database)).rememberVoiceBindings(
+                plan.playableSegments.map {
+                    NovelAudioVoiceBinding(plan.serverScope, it.speakerId, it.voiceAssetId,
+                        it.bindingRevision)
+                }
+            )
+        }
+        return plan
     }
 
     fun recoverablePinnedTasks(): List<NovelAudioDownloadTaskEntity> {

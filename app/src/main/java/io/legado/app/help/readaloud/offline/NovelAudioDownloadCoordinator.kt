@@ -204,21 +204,24 @@ class NovelAudioDownloadCoordinator(
             repository.releaseExecution(execution)
             throw error
         } catch (error: Throwable) {
+            val reason = downloadFailureReason(error)
             repository.updatePlan(
                 planId = plan.planId,
                 generation = plan.generation,
                 executionAttempt = execution.executionAttempt,
                 state = NovelAudioStates.FAILED,
-                progress = 0
+                progress = 0,
+                reason = reason
             )
             repository.updateTask(
                 taskId = taskId,
                 generation = plan.generation,
                 executionAttempt = execution.executionAttempt,
                 state = NovelAudioStates.FAILED,
-                progress = 0
+                progress = 0,
+                reason = reason
             )
-            Result.Failed(downloadFailureReason(error))
+            Result.Failed(reason)
         }
     }
 

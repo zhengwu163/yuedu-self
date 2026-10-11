@@ -17,6 +17,8 @@ class NovelAudioDownloadCoordinatorTest {
             "NovelAudioServerException:CONCURRENCY_LIMIT",
             downloadFailureReason(NovelAudioServerException("CONCURRENCY_LIMIT"))
         )
+        assertEquals("NovelAudioServerException:INVALID_LEASE",
+            downloadFailureReason(NovelAudioServerException("INVALID_LEASE")))
     }
 
     @Test

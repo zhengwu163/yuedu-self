@@ -14,6 +14,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NovelAudioCharacterRegistryTest {
+    @Test
+    fun `remembering voices preserves manual assignments and separates server scopes`() {
+        val store = MemoryCharacterStore()
+        val registry = CharacterRegistry(store)
+        val initial = NovelAudioVoiceBinding("scope", 42L, "voice-a", 1L)
+        registry.rememberVoiceBindings(listOf(initial, initial))
+        store.upsertVoiceBinding(initial.copy(voiceAssetId = "manual", revision = 2L).toEntity())
+        registry.rememberVoiceBindings(listOf(initial,
+            initial.copy(scope = "other", voiceAssetId = "voice-b")))
+        assertEquals("manual", store.voiceBindings("scope").single().voiceAssetId)
+        assertEquals(2L, store.voiceBindings("scope").single().revision)
+        assertEquals("voice-b", store.voiceBindings("other").single().voiceAssetId)
+    }
 
     @Test
     fun `temporary characters reuse stable ids through aliases`() {

@@ -149,6 +149,19 @@ class MemoryCharacterStore : NovelAudioCharacterStore {
 }
 
 class CharacterRegistry(private val store: NovelAudioCharacterStore) {
+    /** Keep the first stable assignment, including when backfilling an older READY plan. */
+    fun rememberVoiceBindings(bindings: List<NovelAudioVoiceBinding>) {
+        store.inTransaction {
+            val existing = store.voiceBindings(bindings.map { it.characterId }.toSet())
+                .map { it.scope to it.characterId }.toSet()
+            bindings.distinctBy { it.scope to it.characterId }.forEach { binding ->
+                if ((binding.scope to binding.characterId) !in existing) {
+                    store.upsertVoiceBinding(binding.toEntity())
+                }
+            }
+        }
+    }
+
     fun resolve(
         workKey: String,
         newCharacters: List<NewCharacter> = emptyList(),

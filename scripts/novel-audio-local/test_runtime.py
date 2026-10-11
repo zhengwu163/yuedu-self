@@ -160,6 +160,40 @@ class RuntimeManagerTest(unittest.TestCase):
         self.assertEqual(RuntimeState.IDLE, runtime.status().state)
         self.assertEqual(1, factory.close_count)
 
+    def test_active_batch_renews_deadline_but_idle_lease_still_expires(self):
+        now = [0.0]
+        factory = FakeWorkerFactory()
+        runtime = RuntimeManager(factory, lease_ttl=10, clock=lambda: now[0])
+        try:
+            lease = runtime.acquire("session", "pinned", 1)
+            for timestamp in (9.0, 18.0, 27.0):
+                now[0] = timestamp
+                runtime.begin_generation(lease.lease_id)
+                runtime.end_generation(lease.lease_id)
+            self.assertEqual(1, factory.start_count)
+            self.assertEqual(0, factory.close_count)
+            now[0] = 38.0
+            self.assertEqual(RuntimeState.IDLE, runtime.status().state)
+            self.assertEqual(1, factory.close_count)
+            with self.assertRaises(LeaseExpiredError):
+                runtime.begin_generation(lease.lease_id)
+        finally:
+            runtime.close()
+
+    def test_stuck_generation_is_bounded_after_renewal(self):
+        now = [0.0]
+        factory = FakeWorkerFactory()
+        runtime = RuntimeManager(factory, lease_ttl=10, clock=lambda: now[0])
+        try:
+            lease = runtime.acquire("session", "pinned", 1)
+            now[0] = 9.0
+            runtime.begin_generation(lease.lease_id)
+            now[0] = 20.0
+            self.assertEqual(RuntimeState.IDLE, runtime.status().state)
+            self.assertEqual(1, factory.close_count)
+        finally:
+            runtime.close()
+
     def test_expired_lease_token_remains_expired_after_watchdog_removes_lease(self):
         now = [100.0]
         factory = FakeWorkerFactory()
