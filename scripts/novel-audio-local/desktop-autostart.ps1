@@ -1,0 +1,12 @@
+param([Parameter(Mandatory=$true)][string]$ConfigPath,
+      [ValidateSet('enable','disable')][string]$Mode = 'enable')
+$ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'desktop-common.ps1')
+$key = $null
+try {
+    $command = Get-DesktopAutostartCommand -ScriptRoot $PSScriptRoot -ConfigPath $ConfigPath
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+    Set-DesktopAutostartValue -Key $key -Command $command -Enabled ($Mode -eq 'enable')
+    Write-Output ('{"autostart":"' + $Mode + '","scope":"current_user"}')
+} catch { Write-Output '{"errorCode":"desktop_autostart_failed"}'; exit 2 }
+finally { if ($key) { $key.Dispose() } }

@@ -43,4 +43,13 @@ class NovelAudioRuntimeLeaseWiringTest {
         assertTrue(environment.contains("analysis.withLease("))
         assertTrue(environment.contains("downloadCoordinator.withLease("))
     }
+
+    @Test
+    fun `replacement batch waits for preceding runtime release`() {
+        val environment = source("help/readaloud/novel/NovelAudioPreparationEnvironment.kt")
+        assertTrue(environment.contains("runtimeBatchLane.enter()"))
+        assertTrue(environment.indexOf("runtimeBatchLane.enter()") < environment.indexOf("client.acquireRuntime("))
+        assertTrue(environment.contains("private val runtimeBatchLane = NovelAudioRuntimeBatchLane()"))
+        assertTrue(environment.contains("finally { permit.close() }"))
+    }
 }

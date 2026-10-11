@@ -43,26 +43,35 @@ internal class NovelAudioPreparationEnvironment private constructor(
     ): NovelAudioPreparationBatch {
         require(purpose.isNotBlank())
         require(expectedChapterCount in 1..10_000)
-        val lease = try {
-            client.acquireRuntime(
-                sessionId = NovelAudioIdentity.storageKey(
-                    "runtime",
-                    UUID.randomUUID().toString()
-                ),
-                purpose = purpose,
-                expectedChapterCount = expectedChapterCount
-            )
-        } catch (error: NovelAudioServerException) {
-            if (error.kind == "UNSUPPORTED") {
-                return NovelAudioPreparationBatch(this, null, client)
+        // Coroutine.cancel() does not await the preceding HTTP release. Keep
+        // current/AUTO/PINNED handoffs serialized through that cleanup as well.
+        val permit = runtimeBatchLane.enter()
+        try {
+            val lease = try {
+                client.acquireRuntime(
+                    sessionId = NovelAudioIdentity.storageKey(
+                        "runtime",
+                        UUID.randomUUID().toString()
+                    ),
+                    purpose = purpose,
+                    expectedChapterCount = expectedChapterCount
+                )
+            } catch (error: NovelAudioServerException) {
+                if (error.kind == "UNSUPPORTED") {
+                    return NovelAudioPreparationBatch(this, null, client, permit)
+                }
+                throw error
             }
+            return NovelAudioPreparationBatch(
+                environment = withLease(lease.leaseId, lease.maxSegmentChars),
+                leaseId = lease.leaseId,
+                client = client,
+                permit = permit
+            )
+        } catch (error: Throwable) {
+            permit.close()
             throw error
         }
-        return NovelAudioPreparationBatch(
-            environment = withLease(lease.leaseId, lease.maxSegmentChars),
-            leaseId = lease.leaseId,
-            client = client
-        )
     }
 
     /** 本地服务声明的单段字数上限随租约生效，保证每次合成都落在其单请求预算内。 */
@@ -130,6 +139,7 @@ internal class NovelAudioPreparationEnvironment private constructor(
 
     companion object {
         private const val AUDIO_DIRECTORY = "novel-audio"
+        private val runtimeBatchLane = NovelAudioRuntimeBatchLane()
 
         /** 未配置服务器凭据时返回 null；调用方据此报 MISSING_CREDENTIALS。 */
         fun open(): NovelAudioPreparationEnvironment? {
@@ -175,16 +185,20 @@ internal class NovelAudioPreparationEnvironment private constructor(
 internal class NovelAudioPreparationBatch internal constructor(
     val environment: NovelAudioPreparationEnvironment,
     val leaseId: String?,
-    private val client: NovelAudioServerClient
+    private val client: NovelAudioServerClient,
+    private val permit: NovelAudioRuntimeBatchLane.Permit
 ) {
     private val closed = AtomicBoolean(false)
 
     suspend fun close() {
-        if (leaseId.isNullOrBlank() || !closed.compareAndSet(false, true)) return
-        kotlin.runCatching {
-            client.releaseRuntime(leaseId)
-        }.onFailure {
-            AppLog.put("AI 听书运行时释放失败", it)
-        }
+        if (!closed.compareAndSet(false, true)) return
+        try {
+            if (leaseId.isNullOrBlank()) return
+            kotlin.runCatching {
+                client.releaseRuntime(leaseId)
+            }.onFailure {
+                AppLog.put("AI 听书运行时释放失败", it)
+            }
+        } finally { permit.close() }
     }
 }

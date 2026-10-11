@@ -5,6 +5,42 @@ Windows-native operator boundary. Stage 7B is the gate before Android
 integration. The service binds to existing local assets; it does not download,
 move, copy, rename, or modify model weights.
 
+## Desktop controls and login startup
+
+After installation and a passing model check, launch the tray with native
+Windows PowerShell 5.1 (the source and config paths may contain spaces):
+
+```powershell
+powershell.exe -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "<source>\scripts\novel-audio-local\desktop.ps1" -ConfigPath "<service-root>\local-model.json" -StartAgent
+```
+
+The tray offers Start service, Stop service, and Exit tray. Start/Stop delegate
+to the existing operator scripts with their process ownership checks and
+startup timeout. Exiting the tray leaves the service running. A per-config
+mutex prevents duplicate tray instances. Status is read locally; credentials
+are never displayed.
+
+Optional startup is **at this user's Windows login**, not a system service or
+startup before login. No elevation or firewall changes are needed:
+
+```powershell
+& "<source>\scripts\novel-audio-local\desktop-autostart.ps1" -ConfigPath "<service-root>\local-model.json" -Mode enable
+& "<source>\scripts\novel-audio-local\desktop-autostart.ps1" -ConfigPath "<service-root>\local-model.json" -Mode disable
+```
+
+Only the matching `NovelAudioLocal` value under the current user's Run key is
+changed. An existing different command is rejected; other startup entries are
+preserved. Disable the old command before moving the source directory. The
+allowlisted source ZIP includes these controls and example configurations;
+existing Python/CUDA/llama/ffmpeg runtimes and licensed local model assets are
+still required. The ZIP contains no model weights, configured token, or private
+machine configuration.
+
+Model replacement uses the existing registry: stop the service, bind a new
+profile to existing local assets, compute their hashes with `model_registry`,
+run `check-models.ps1`, then start. Never overwrite existing weights or copy
+private machine configuration into a public bundle.
+
 ## Runtime boundary and safety
 
 The resident Agent owns:
