@@ -70,6 +70,24 @@ class NovelAudioServerClientTest {
         server.stop()
     }
 
+    @Test fun `voice matching omits blank optional constraints on the wire`() = runBlocking {
+        payload = """{"candidates":[]}"""
+        for ((constraints, expected) in listOf(
+            VoiceConstraints(gender = "male") to mapOf("gender" to "male"),
+            VoiceConstraints() to emptyMap(),
+            VoiceConstraints(ageRange = "adult") to mapOf("ageRange" to "adult"),
+            VoiceConstraints(gender = "female", ageRange = "adult") to
+                mapOf("gender" to "female", "ageRange" to "adult")
+        )) {
+            client.match(VoiceMatchRequest(VoicePersona(), optionalConstraints = constraints))
+            val body = JsonParser.parseString(requests.last().third).asJsonObject
+            val actual = body.getAsJsonObject("optionalConstraints")?.entrySet()
+                ?.associate { it.key to it.value.asString }.orEmpty()
+            assertEquals(expected, actual)
+            if (expected.isEmpty()) assertFalse(body.has("optionalConstraints"))
+        }
+    }
+
     @Test fun `health uses versioned path bearer and readiness`() = runBlocking {
         val result = client.health()
         assertTrue(result.directorReady && result.ttsReady)

@@ -129,8 +129,18 @@ class NovelAudioServerClient(
     }
 
     suspend fun match(request: VoiceMatchRequest): List<VoiceAsset> = withContext(Dispatchers.IO) {
+        // Optional constraints are absent when unknown; v1 rejects present blank strings.
+        val constraints = request.optionalConstraints?.let {
+            mapOf("gender" to it.gender, "ageRange" to it.ageRange)
+                .filterValues { value -> value.isNotBlank() }
+        }.orEmpty()
+        val payload = linkedMapOf<String, Any>(
+            "voicePersona" to request.voicePersona,
+            "alreadyUsedVoiceIds" to request.alreadyUsedVoiceIds
+        )
+        if (constraints.isNotEmpty()) payload["optionalConstraints"] = constraints
         NovelAudioJson.voices(
-            json("voices/match", encodePayload(request), 15_000, null, "POST"),
+            json("voices/match", encodePayload(payload), 15_000, null, "POST"),
             "candidates"
         )
     }
