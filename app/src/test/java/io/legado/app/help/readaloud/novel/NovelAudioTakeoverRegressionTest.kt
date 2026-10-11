@@ -47,6 +47,13 @@ class NovelAudioTakeoverRegressionTest {
             activity.indexOf("ReadAloud.stop(this)") < activity.indexOf("NovelAudioPinnedChapterPreparer.prepare("))
     }
 
+    @Test fun replacementReadyChapterSuppressesOldInterruptedRecovery() {
+        val dao = source("data/dao/NovelAudioDao.kt")
+        val query = dao.substringBefore("fun recoverablePinnedTasks").substringAfterLast("@Query(")
+        assertTrue("An older partial task must not load models for an already replaced ready chapter",
+            query.contains("NOT EXISTS") && query.contains("replacement.createdAt >= original.createdAt"))
+    }
+
     @Test
     fun readyNotificationUsesTheCompletedPlanInsteadOfAnOlderGeneration() {
         val service = source("service/NovelAudioReadAloudService.kt")

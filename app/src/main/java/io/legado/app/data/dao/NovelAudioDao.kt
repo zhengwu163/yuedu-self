@@ -321,12 +321,22 @@ interface NovelAudioDao {
     )
     fun downloadTasks(physicalBookUrl: String): List<NovelAudioDownloadTaskEntity>
 
+    // Keep interrupted downloads for inspection, but do not restart an obsolete
+    // chapter once a newer pinned plan is already complete.
     @Query(
         """
-        SELECT * FROM novel_audio_download_tasks
-        WHERE retention = 'PINNED'
-          AND state IN ('QUEUED', 'RUNNING', 'PARTIAL', 'WAITING_NETWORK', 'PAUSED')
-        ORDER BY createdAt ASC, taskId ASC
+        SELECT task.* FROM novel_audio_download_tasks AS task
+        LEFT JOIN novel_audio_chapter_plans AS original ON original.planId = task.planId
+        WHERE task.retention = 'PINNED'
+          AND task.state IN ('QUEUED', 'RUNNING', 'PARTIAL', 'WAITING_NETWORK', 'PAUSED')
+          AND NOT EXISTS (
+            SELECT 1 FROM novel_audio_chapter_plans AS replacement
+            WHERE replacement.physicalBookUrl = task.physicalBookUrl
+              AND replacement.chapterIndex = task.chapterIndex
+              AND replacement.retention = 'PINNED' AND replacement.state = 'READY'
+              AND replacement.createdAt >= original.createdAt
+          )
+        ORDER BY task.createdAt ASC, task.taskId ASC
         """
     )
     fun recoverablePinnedTasks(): List<NovelAudioDownloadTaskEntity>

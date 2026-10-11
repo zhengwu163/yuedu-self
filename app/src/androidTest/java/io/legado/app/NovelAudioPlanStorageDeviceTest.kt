@@ -25,6 +25,32 @@ import org.junit.runner.RunWith
 /** Verify the real Room/Gson boundary in the minified debug APK without user data. */
 @RunWith(AndroidJUnit4::class)
 class NovelAudioPlanStorageDeviceTest {
+    @Test fun readyReplacementLeavesOldTaskIntactButDoesNotRecoverIt() {
+        val database = Room.inMemoryDatabaseBuilder(
+            InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java
+        ).build()
+        try {
+            val dao = database.novelAudioDao
+            dao.insertChapterPlan(io.legado.app.data.entities.NovelAudioChapterPlanEntity(
+                planId = "old", physicalBookUrl = "book", chapterIndex = 0, createdAt = 1L,
+                state = NovelAudioStates.PARTIAL, retention = NovelAudioRetention.PINNED))
+            dao.insertDownloadTask(io.legado.app.data.entities.NovelAudioDownloadTaskEntity(
+                taskId = "old-task", planId = "old", physicalBookUrl = "book", chapterIndex = 0,
+                state = NovelAudioStates.PARTIAL, retention = NovelAudioRetention.PINNED))
+            dao.insertChapterPlan(io.legado.app.data.entities.NovelAudioChapterPlanEntity(
+                planId = "remaining", physicalBookUrl = "book", chapterIndex = 1, createdAt = 1L,
+                state = NovelAudioStates.PARTIAL, retention = NovelAudioRetention.PINNED))
+            dao.insertDownloadTask(io.legado.app.data.entities.NovelAudioDownloadTaskEntity(
+                taskId = "remaining-task", planId = "remaining", physicalBookUrl = "book", chapterIndex = 1,
+                state = NovelAudioStates.PARTIAL, retention = NovelAudioRetention.PINNED))
+            assertEquals(2, dao.recoverablePinnedTasks().size)
+            dao.insertChapterPlan(io.legado.app.data.entities.NovelAudioChapterPlanEntity(
+                planId = "new", physicalBookUrl = "book", chapterIndex = 0, createdAt = 2L,
+                state = NovelAudioStates.READY, retention = NovelAudioRetention.PINNED))
+            assertEquals(listOf("remaining-task"), dao.recoverablePinnedTasks().map { it.taskId })
+            assertEquals(NovelAudioStates.PARTIAL, dao.downloadTasksForPlan("old").single().state)
+        } finally { database.close() }
+    }
     @Test fun latestPinnedPlanWinsOverOldLargerSnapshotHash() {
         val database = Room.inMemoryDatabaseBuilder(
             InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java
