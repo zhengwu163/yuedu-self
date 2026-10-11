@@ -282,7 +282,8 @@ fun CharacterManageScreen(
     onOpenCard: (BookCharacter) -> Unit,
     onEdit: (BookCharacter) -> Unit,
     onDelete: (BookCharacter) -> Unit,
-    onOpenRelations: () -> Unit
+    onOpenRelations: () -> Unit,
+    onFixedVoices: (() -> Unit)? = null
 ) {
     val roleSections = remember(characters) { characterRoleSections(characters) }
     var selectedRoleLevel by remember(characters) {
@@ -324,7 +325,10 @@ fun CharacterManageScreen(
         searchHint = "搜索角色名称 / 身份 / 技能",
         onSearchChange = { searchQuery = it },
         onBack = onBack,
-        topActions = listOf(
+        topActions = listOfNotNull(
+            onFixedVoices?.let { action -> AppManagementAction(
+                text = "固定音色", iconRes = R.drawable.ic_groups, onClick = action
+            ) },
             AppManagementAction(
                 text = "关系网",
                 iconRes = R.drawable.ic_groups,

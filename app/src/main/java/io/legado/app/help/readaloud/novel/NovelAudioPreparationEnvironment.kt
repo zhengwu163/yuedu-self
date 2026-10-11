@@ -133,7 +133,7 @@ internal class NovelAudioPreparationEnvironment private constructor(
             produce = { snapshot, generation, retention, isPlanCurrent ->
                 val existingCharacters = characterStore.characters(snapshot.workKey)
                 val existingBindings = characterStore
-                    .voiceBindings(existingCharacters.map { it.id }.toSet())
+                    .voiceBindings(existingCharacters.map { it.id }.toSet() + 0L)
                     .map { it.toDomain() }
                 producer.produce(
                     snapshot = snapshot,

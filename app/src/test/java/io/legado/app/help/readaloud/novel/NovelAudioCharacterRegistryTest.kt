@@ -14,6 +14,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NovelAudioCharacterRegistryTest {
+    @org.junit.Test fun manualVoiceAndNarratorChoicesSurviveAutomaticMatching() {
+        val store = MemoryCharacterStore()
+        val registry = CharacterRegistry(store)
+        val narrator = registry.setVoiceBinding("scope", 0L, "fixed-narrator")
+        val character = registry.setVoiceBinding("scope", 12L, "fixed-character")
+        registry.rememberVoiceBindings(listOf(
+            narrator.copy(voiceAssetId = "random-narrator"),
+            character.copy(voiceAssetId = "random-character")))
+        org.junit.Assert.assertEquals("fixed-narrator", store.voiceBindings("scope").first { it.characterId == 0L }.voiceAssetId)
+        org.junit.Assert.assertEquals("fixed-character", store.voiceBindings("scope").first { it.characterId == 12L }.voiceAssetId)
+        org.junit.Assert.assertEquals(1L, registry.setVoiceBinding("scope", 12L, "fixed-character").revision)
+        org.junit.Assert.assertEquals(2L, registry.setVoiceBinding("scope", 12L, "another-fixed").revision)
+    }
     @Test
     fun `remembering voices preserves manual assignments and separates server scopes`() {
         val store = MemoryCharacterStore()

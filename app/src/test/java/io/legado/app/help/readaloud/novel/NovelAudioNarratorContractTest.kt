@@ -101,12 +101,17 @@ class NovelAudioNarratorContractTest {
                     SpeakerAssignment(unit.unitId, order[index].id.toString())
                 }) }
         )
-        val plan = coordinator.analyze(first, "scope", existingCharacters = roles)
+        fun dialogueUnits(snapshot: NovelAudioChapterSnapshot) = snapshot.parseUnits().map {
+            if (it.text.isBlank()) it else it.copy(kind = "dialogue", roleType = "character")
+        }
+        val plan = coordinator.analyze(first, "scope", existingCharacters = roles,
+            parsedUnits = dialogueUnits(first))
         val original = plan.segments.associate { it.speakerId to it.voiceAssetId }
         assertEquals(3, store.voiceBindings("scope").size)
         order = roles.reversed()
         val next = coordinator.analyze(snapshot(1), "scope", existingCharacters = roles,
-            existingBindings = store.voiceBindings("scope").map { it.toDomain() })
+            existingBindings = store.voiceBindings("scope").map { it.toDomain() },
+            parsedUnits = dialogueUnits(snapshot(1)))
         assertEquals(original, next.segments.associate { it.speakerId to it.voiceAssetId })
     }
 }

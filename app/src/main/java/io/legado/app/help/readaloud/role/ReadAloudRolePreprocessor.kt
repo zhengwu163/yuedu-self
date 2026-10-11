@@ -41,7 +41,7 @@ data class ReadAloudRolePreprocessResult(
 
 object ReadAloudRolePreprocessor {
 
-    const val VERSION = "builtin-dialogue-cluster-v4"
+    const val VERSION = "builtin-dialogue-cluster-v5"
 
     private val defaultQuotePairs = mapOf(
         '“' to '”',
@@ -203,7 +203,14 @@ object ReadAloudRolePreprocessor {
             .trim(openChar, closeChar, '“', '”', '‘', '’', '"', '\'', '「', '」', '『', '』')
             .trim()
         val isCrossParagraph = ranges.map { it.paragraphIndex }.distinct().size > 1
-        val looksLikeDialogue = (isCrossParagraph && config.mergeCrossParagraphQuote) ||
+        val reportingCue = Regex("(?:说|问|答|喊|吼|道)[：:，,\\s]*$")
+            .containsMatchIn(prefix.takeLast(40)) ||
+            Regex("^[，,。！？\\s]*[\\p{L}]{1,8}(?:说|问|答|喊|吼|道)")
+                .containsMatchIn(suffix.take(40))
+        val standaloneQuote = ranges.size == 1 &&
+            paragraphs[ranges.first().paragraphIndex - paragraphOffset].trim() == text.trim()
+        val looksLikeDialogue = reportingCue || standaloneQuote ||
+            (isCrossParagraph && config.mergeCrossParagraphQuote) ||
             inner.length >= config.dialogueMinLength ||
             inner.any { it in config.sentencePunctuation }
         val thought = config.thoughtCueRegex.containsMatchIn(prefix.takeLast(40)) ||

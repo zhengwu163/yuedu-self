@@ -14,6 +14,10 @@ import java.io.File
  * 两条路径的预算口径与 artifact 校验就会各自漂移。
  */
 class NovelAudioPreparationEnvironmentWiringTest {
+    @Test fun narratorBindingIsIncludedInEveryPreparation() {
+        assertTrue(novel("NovelAudioPreparationEnvironment.kt")
+            .contains(".voiceBindings(existingCharacters.map { it.id }.toSet() + 0L)"))
+    }
 
     private val root = sequenceOf(File("src/main/java"), File("app/src/main/java"))
         .first { it.isDirectory }

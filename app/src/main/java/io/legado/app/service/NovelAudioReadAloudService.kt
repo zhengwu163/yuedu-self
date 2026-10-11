@@ -158,8 +158,8 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         if (local.files.isNotEmpty() && exoPlayer.playbackState == Player.STATE_IDLE) {
             exoPlayer.prepare()
         }
-        exoPlayer.play()
         publishSegmentProgress()
+        exoPlayer.play()
     }
 
     override fun playStop() {
@@ -184,8 +184,8 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     override fun resumeReadAloud() {
         super.resumeReadAloud()
         if (prepared != null) {
-            exoPlayer.play()
             publishSegmentProgress()
+            exoPlayer.play()
             publishPlaybackState(ReadAloudPlaybackState.PHASE_PLAYING, playing = true)
         }
     }
@@ -220,10 +220,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             }
 
             Player.STATE_ENDED -> {
-                if (currentSegmentIndex < (prepared?.files?.lastIndex ?: -1)) {
-                    currentSegmentIndex++
-                    publishSegmentProgress()
-                } else if (!checkTimerAtChapterEnd()) {
+                if (!checkTimerAtChapterEnd()) {
                     nextChapter()
                 }
             }
@@ -231,10 +228,9 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     }
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-        if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO &&
-            currentSegmentIndex < (prepared?.files?.lastIndex ?: -1)
-        ) {
-            currentSegmentIndex++
+        val index = exoPlayer.currentMediaItemIndex
+        if (index in (prepared?.files?.indices ?: IntRange.EMPTY)) {
+            currentSegmentIndex = index
             publishSegmentProgress()
         }
     }
@@ -451,7 +447,8 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
         )
     }
 
-    private fun publishSegmentProgress() {        val plan = prepared?.plan ?: return
+    private fun publishSegmentProgress() {
+        val plan = prepared?.plan ?: return
         val segment = plan.playableSegments.getOrNull(currentSegmentIndex) ?: return
         val chapterPosition = chapterPositionForSegment(
             segment = segment,

@@ -149,6 +149,22 @@ class MemoryCharacterStore : NovelAudioCharacterStore {
 }
 
 class CharacterRegistry(private val store: NovelAudioCharacterStore) {
+    fun stableAliases(workKey: String): List<NovelAudioAliasEntity> = store.aliases(workKey)
+
+    /** A user's selection is authoritative and survives later automatic matching. */
+    fun setVoiceBinding(scope: String, characterId: Long, voiceAssetId: String): NovelAudioVoiceBinding {
+        require(scope.isNotBlank() && characterId >= 0L && voiceAssetId.isNotBlank())
+        var result: NovelAudioVoiceBinding? = null
+        store.inTransaction {
+            val current = store.voiceBindings(setOf(characterId))
+                .firstOrNull { it.scope == scope && it.characterId == characterId }
+            result = NovelAudioVoiceBinding(scope, characterId, voiceAssetId,
+                if (current?.voiceAssetId == voiceAssetId) current.revision else (current?.revision ?: 0L) + 1L)
+            store.upsertVoiceBinding(requireNotNull(result).toEntity())
+        }
+        return requireNotNull(result)
+    }
+
     /** Keep the first stable assignment, including when backfilling an older READY plan. */
     fun rememberVoiceBindings(bindings: List<NovelAudioVoiceBinding>) {
         store.inTransaction {

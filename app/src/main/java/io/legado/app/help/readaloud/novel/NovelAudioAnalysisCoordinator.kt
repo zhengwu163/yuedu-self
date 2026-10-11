@@ -120,6 +120,11 @@ class NovelAudioAnalysisCoordinator(
                 .takeLast(MAX_PREVIOUS_ASSIGNMENTS)
         }
 
+        val aliases = registry?.stableAliases(snapshot.workKey).orEmpty()
+        parsedUnits.forEachIndexed { index, unit ->
+            NovelAudioSpeakerResolver.explicitSpeaker(parsedUnits, index, knownCharacters, aliases)
+                ?.let { assignmentByUnit[unit.unitId] = it.toString() }
+        }
         val bindings = bindVoices(
             scope = scope,
             speakerIds = assignmentByUnit.values.mapNotNull { it.toLongOrNull() }.distinct(),
@@ -220,7 +225,10 @@ class NovelAudioAnalysisCoordinator(
             AnalysisCharacter(
                 characterId = character.id.toString(),
                 displayName = character.name,
-                stableAliases = listOf(character.name).take(MAX_ALIASES_PER_CHARACTER)
+                stableAliases = (listOf(character.name) +
+                    registry?.stableAliases(snapshot.workKey).orEmpty()
+                        .filter { it.characterId == character.id }.map { it.alias })
+                    .distinct().take(MAX_ALIASES_PER_CHARACTER)
                     .map { it.take(MAX_ALIAS_LENGTH) }
             )
         }

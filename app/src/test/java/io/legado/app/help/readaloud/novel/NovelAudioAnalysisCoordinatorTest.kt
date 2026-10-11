@@ -16,6 +16,61 @@ import kotlinx.coroutines.runBlocking
 class NovelAudioAnalysisCoordinatorTest {
 
     @Test
+    fun explicitReportingClauseWinsOverWrongModelSpeaker() = runBlocking {
+        val work = "work:test"
+        val characters = listOf(
+            io.legado.app.data.entities.BookCharacter(id = 12L, bookUrl = work, name = "陈远"),
+            io.legado.app.data.entities.BookCharacter(id = 9L, bookUrl = work, name = "林青")
+        )
+        val store = MemoryCharacterStore().apply { seed(work, characters) }
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            bookUrl = "book://cue", chapterIndex = 0, chapterUrl = "c", workKey = work,
+            strings = listOf("陈远问道：“明天我们在哪里见面？”"),
+            rules = ReadAloudPreprocessRuleConfig().freeze()
+        )
+        val plan = NovelAudioAnalysisCoordinator(
+            registry = CharacterRegistry(store),
+            analyze = { request -> ChapterAnalysisResponse(assignments = request.units.map {
+                SpeakerAssignment(it.unitId, "9")
+            }) }
+        ).analyze(snapshot, "scope", existingCharacters = characters)
+        assertEquals(12L, plan.playableSegments.last().speakerId)
+        assertEquals(0L, plan.playableSegments.first().speakerId)
+    }
+
+    @Test
+    fun storedStableAliasIsSentBackToModelInLaterChapter() = runBlocking {
+        val work = "work:test"
+        val character = io.legado.app.data.entities.BookCharacter(id = 12L, bookUrl = work, name = "陈远")
+        val store = MemoryCharacterStore().apply {
+            seed(work, listOf(character))
+            seedAlias(io.legado.app.data.entities.NovelAudioAliasEntity(
+                workKey = work, characterId = 12L, alias = "阿远", normalizedAlias = "阿远"
+            ))
+        }
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            bookUrl = "book://alias", chapterIndex = 1, chapterUrl = "c", workKey = work,
+            strings = listOf("阿远说：“今天一起出发。”"),
+            rules = ReadAloudPreprocessRuleConfig().freeze()
+        )
+        NovelAudioAnalysisCoordinator(registry = CharacterRegistry(store), analyze = { request ->
+            assertTrue(request.characters.single().stableAliases.contains("阿远"))
+            ChapterAnalysisResponse(assignments = request.units.map { SpeakerAssignment(it.unitId, "12") })
+        }).analyze(snapshot, "scope", existingCharacters = listOf(character))
+        Unit
+    }
+
+    @Test
+    fun shortReplyWithExplicitReportingCueIsNotNarrator() = runBlocking {
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            bookUrl = "book://short", chapterIndex = 0, chapterUrl = "c",
+            strings = listOf("陈远答道：“好”"),
+            rules = ReadAloudPreprocessRuleConfig().freeze()
+        )
+        assertEquals("character", snapshot.parseUnits().last().roleType)
+    }
+
+    @Test
     fun `analysis batches units by count and UTF16 budget and omits whitespace requests`() = runBlocking {
         val units = List(200) { index ->
             ParsedTextUnit(

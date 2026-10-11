@@ -137,6 +137,10 @@ import io.legado.app.help.ai.AiReadAloudRoleState
 import io.legado.app.help.book.characterBookKey
 import io.legado.app.help.character.BookCharacterIdentityMigrator
 import io.legado.app.help.readaloud.novel.NovelAudioCharacterScope
+import io.legado.app.help.readaloud.novel.NovelAudioPlaybackPresentation
+import io.legado.app.help.readaloud.novel.NovelAudioParagraphCoordinate
+import io.legado.app.help.readaloud.novel.NovelAudioRepository
+import io.legado.app.data.entities.NovelAudioPlanJson
 import io.legado.app.help.CoverDisplayResolver
 import io.legado.app.help.config.AppConfig
 import io.legado.app.help.readaloud.casting.TtsCastingStore
@@ -1168,6 +1172,14 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
         val chapter = ReadBook.curTextChapter ?: return null
         BookCharacterIdentityMigrator.migrate(book)
         val chapterSequence = chapter.chapter.index
+        val novelPlan = if (SpeechRoute.fromTtsEngineValue(ReadAloud.ttsEngine).engineType ==
+            SpeechRoute.ENGINE_NOVEL_AUDIO) {
+            playbackPlanKey.takeIf { it.isNotBlank() }?.let { key ->
+                appDb.novelAudioDao.chapterPlan(key)?.takeIf {
+                    it.physicalBookUrl == book.bookUrl && it.chapterIndex == chapterSequence
+                }?.let { NovelAudioPlanJson.decode(it.planJson) }
+            } ?: NovelAudioRepository(appDb).currentPlan(book.bookUrl, chapterSequence)
+        } else null
         val readAloudByPage = context.getPrefBoolean(PreferKey.readAloudByPage)
         val paragraphs = chapter.getParagraphs(false)
         val baseCues = chapter.buildReadAloudCues(readAloudByPage)
@@ -1229,7 +1241,8 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             roleCache?.voiceHash.orEmpty(),
             roleCache?.segmentsJson?.length?.toString().orEmpty(),
             roleCache?.segmentsJson?.hashCode()?.toString().orEmpty(),
-            audioInfo.fingerprint
+            audioInfo.fingerprint,
+            novelPlan?.planId.orEmpty()
         ).joinToString("|")
         chapterModelCache?.takeIf { it.key == modelKey }?.let { return it }
         val chapterKey = "${book.bookUrl}:$chapterSequence"
@@ -1251,6 +1264,16 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             ?.let { it.chapterPosition + it.charSize }
             ?.coerceAtLeast(1)
             ?: 1
+        val frozenCues = novelPlan?.let { plan ->
+            NovelAudioPlaybackPresentation.cues(plan, chapter.paragraphs.map {
+                NovelAudioParagraphCoordinate(it.sourceIndex, it.chapterPosition, it.length)
+            }, appDb.bookCharacterDao.characters(plan.workKey))
+        }
+        val displayedCues = frozenCues?.map { cue ->
+            val page = chapter.getPageIndexByCharIndex(cue.chapterPosition).coerceAtLeast(0)
+            ReadAloudCue(cue.index, cue.text, cue.chapterPosition, page,
+                (cue.chapterPosition - chapter.getReadLength(page)).coerceAtLeast(0), cue.key)
+        } ?: speechPlan.cues
         return PlayerChapterModel(
             key = modelKey,
             bookName = book.name.ifBlank { context.getString(R.string.book_name) },
@@ -1263,19 +1286,24 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             chapterIndexText = "${chapterSequence + 1}/${chapter.chaptersSize.coerceAtLeast(chapterSequence + 1)}",
             chapterSequence = chapterSequence,
             chapterKey = chapterKey,
-            planKey = planKey,
+            planKey = novelPlan?.planId ?: planKey,
             chapterCount = ReadBook.chapterSize.coerceAtLeast(chapterSequence + 1),
             totalLength = totalLength,
             paragraphs = paragraphs,
             baseCues = baseCues,
-            cues = speechPlan.cues,
-            cuePositions = speechPlan.cues.map { it.chapterPosition }.toIntArray(),
-            speechItems = speechPlan.items,
-            textCues = speechPlan.cues.toTextCueUi(chapterKey, chapterSequence),
-            sceneSegments = if (multiRoleEnabled) speechPlan.items.toSceneSegmentUi(chapterKey) else emptyList(),
+            cues = displayedCues,
+            cuePositions = displayedCues.map { it.chapterPosition }.toIntArray(),
+            speechItems = if (novelPlan == null) speechPlan.items else emptyList(),
+            textCues = displayedCues.toTextCueUi(chapterKey, chapterSequence),
+            sceneSegments = if (!multiRoleEnabled) emptyList() else frozenCues?.map { cue ->
+                SceneSegmentUi(cue.index, cue.key, cue.text,
+                    if (cue.speakerId == 0L) "narrator" else "character",
+                    cue.speakerId, cue.speakerName, cue.avatar, "", cue.speakerId != 0L,
+                    cue.speakerId == 0L, false, cue.chapterPosition)
+            } ?: speechPlan.items.toSceneSegmentUi(chapterKey),
             roleCacheKey = roleCacheKey,
-            roleCacheReady = roleCacheReady,
-            roleCacheRunning = roleCacheRunning,
+            roleCacheReady = novelPlan != null || roleCacheReady,
+            roleCacheRunning = novelPlan == null && roleCacheRunning,
             chapterPreview = buildChapterPreview(book.bookUrl, chapterSequence, ReadBook.chapterSize),
             characterPreview = characterPreview,
             audioInfo = audioInfo
@@ -1345,9 +1373,12 @@ class ReadAloudPlayerPanel @JvmOverloads constructor(
             ?: cue?.chapterPosition
             ?: paragraph?.chapterPosition
             ?: 0
-        val sentence = sentenceSourceText
-            ?.focusSentenceAt(chapterStart - sentenceStart)
-            ?: (0 to paragraphText)
+        // Local audio has segment timing, not word timing. Show its whole short segment before speech.
+        val sentence = if (playbackCurrent &&
+            SpeechRoute.fromTtsEngineValue(ReadAloud.ttsEngine).engineType == SpeechRoute.ENGINE_NOVEL_AUDIO
+        ) {
+            0 to paragraphText
+        } else sentenceSourceText?.focusSentenceAt(chapterStart - sentenceStart) ?: (0 to paragraphText)
         val focusText = FocusTextUi(
             key = "$paragraphKey:${sentence.first}:${sentence.second.hashCode()}",
             sequence = paragraphSequence * 1_000 + sentence.first.coerceAtLeast(0),

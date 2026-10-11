@@ -25,6 +25,28 @@ import org.junit.runner.RunWith
 /** Verify the real Room/Gson boundary in the minified debug APK without user data. */
 @RunWith(AndroidJUnit4::class)
 class NovelAudioPlanStorageDeviceTest {
+    @Test fun latestPinnedPlanWinsOverOldLargerSnapshotHash() {
+        val database = Room.inMemoryDatabaseBuilder(
+            InstrumentationRegistry.getInstrumentation().targetContext, AppDatabase::class.java
+        ).build()
+        try {
+            val older = io.legado.app.data.entities.NovelAudioChapterPlanEntity(
+                planId = "old", physicalBookUrl = "book", chapterIndex = 0,
+                generation = 999L, retention = NovelAudioRetention.PINNED, createdAt = 1L
+            )
+            val newer = older.copy(
+                planId = "new", workKey = older.workKey, physicalBookUrl = older.physicalBookUrl,
+                chapterIndex = older.chapterIndex, chapterUrl = older.chapterUrl, scope = older.scope,
+                generation = 1L, executionAttempt = older.executionAttempt, state = older.state,
+                retention = older.retention, snapshotHash = older.snapshotHash, rulesVersion = older.rulesVersion,
+                planJson = older.planJson, progress = older.progress, stateReason = older.stateReason,
+                createdAt = 2L, updatedAt = older.updatedAt
+            )
+            database.novelAudioDao.insertChapterPlan(older)
+            database.novelAudioDao.insertChapterPlan(newer)
+            assertEquals("new", database.novelAudioDao.currentChapterPlan("book", 0)?.planId)
+        } finally { database.close() }
+    }
     @Test
     fun failedDownloadPersistsOnlyItsFixedReason() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

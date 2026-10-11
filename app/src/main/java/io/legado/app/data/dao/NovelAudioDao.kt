@@ -89,7 +89,7 @@ interface NovelAudioDao {
         SELECT * FROM novel_audio_chapter_plans
         WHERE physicalBookUrl = :physicalBookUrl
           AND chapterIndex = :chapterIndex
-        ORDER BY retention = 'PINNED' DESC, generation DESC, updatedAt DESC
+        ORDER BY retention = 'PINNED' DESC, createdAt DESC, generation DESC, updatedAt DESC
         LIMIT 1
         """
     )

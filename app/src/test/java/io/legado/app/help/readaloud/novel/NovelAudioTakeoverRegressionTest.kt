@@ -12,6 +12,42 @@ class NovelAudioTakeoverRegressionTest {
     private fun source(path: String) = File(root, "io/legado/app/$path").readText()
 
     @Test
+    fun novelPlayerBubblesUseTheSameFrozenPlanAsItsAudio() {
+        val panel = source("ui/book/read/ReadAloudPlayerPanel.kt")
+        assertTrue("Legacy cue indexes must not label frozen NovelAudio audio",
+            panel.contains("NovelAudioPlaybackPresentation") && panel.contains("playbackPlanKey"))
+    }
+
+    @Test
+    fun mediaTransitionUsesPlayerIndexForSeekAndAutomaticChanges() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val transition = service.substringAfter("override fun onMediaItemTransition")
+            .substringBefore("override fun onPlayerError")
+        assertTrue("Seeking and automatic transitions both publish the current audio cue",
+            transition.contains("currentMediaItemIndex") && !transition.contains("currentSegmentIndex++"))
+    }
+
+    @Test
+    fun characterManagementOffersLocalFixedVoices() {
+        val activity = source("ui/book/character/BookCharacterManageActivity.kt")
+        assertTrue("Legacy system and HTTP voice selectors cannot save a NovelAudio binding",
+            activity.contains("setVoiceBinding") && activity.contains("onFixedVoices"))
+    }
+
+    @Test fun aNewFrozenPlanWinsEvenIfItsSnapshotGenerationIsNumericallyLower() {
+        val dao = source("data/dao/NovelAudioDao.kt")
+        val query = dao.substringBefore("fun currentChapterPlan").substringAfterLast("@Query(")
+        assertTrue("Snapshot hashes are not chronological generation counters",
+            query.contains("createdAt DESC, generation DESC"))
+    }
+
+    @Test fun explicitRegenerationDropsOldPreparedPlayback() {
+        val activity = source("ui/book/character/BookCharacterManageActivity.kt")
+        assertTrue(activity.indexOf("ReadAloud.stop(this)") >= 0 &&
+            activity.indexOf("ReadAloud.stop(this)") < activity.indexOf("NovelAudioPinnedChapterPreparer.prepare("))
+    }
+
+    @Test
     fun readyNotificationUsesTheCompletedPlanInsteadOfAnOlderGeneration() {
         val service = source("service/NovelAudioReadAloudService.kt")
         val observer = service.substringAfter("override fun observeLiveBus()")
