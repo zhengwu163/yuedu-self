@@ -239,6 +239,91 @@ try {
         }
     }
 
+    Invoke-Case "exited agent recovery clears only verified service state" {
+        $oldPin = [pscustomobject]@{
+            ProcessId = 2147483647; CreationDate = "exited"; CreationTicks = [int64]1
+        }
+        Save-AgentOwner -Context $context -Pin $oldPin
+        Write-SafeStateText -Context $context -Name "agent.pid" -Content "2147483647"
+        Touch-SafeStateFile -Context $context -Name "agent.stop"
+        $commandLock = Enter-OperatorLock -Context $context
+        try {
+            $record = Get-AgentRecord -Context $context
+            Assert-OperatorTest ($null -eq $record.Process) "fixture PID unexpectedly exists"
+            Assert-OperatorTest (Recover-ExitedAgentState -Context $context -Record $record) `
+                "verified exited agent was not recovered"
+            foreach ($name in "agent.pid", "agent.owner.json", "agent.stop") {
+                Assert-OperatorTest (-not (Test-Path -LiteralPath (Join-Path $context.State $name))) `
+                    "exited service state was not cleared"
+            }
+            Assert-OperatorTest (Test-Path -LiteralPath $configPath) "configuration was removed"
+        } finally { Exit-OperatorLock $commandLock }
+    }
+
+    Invoke-Case "exited recovery rejects missing mismatched or changed ownership" {
+        $oldPin = [pscustomobject]@{
+            ProcessId = 2147483647; CreationDate = "exited"; CreationTicks = [int64]1
+        }
+        foreach ($scenario in "missing", "hash", "changed") {
+            Save-AgentOwner -Context $context -Pin $oldPin
+            Write-SafeStateText -Context $context -Name "agent.pid" -Content "2147483647"
+            $record = Get-AgentRecord -Context $context
+            if ($scenario -eq "missing") { Remove-SafeStateFile -Context $context -Name "agent.owner.json" }
+            if ($scenario -eq "hash") {
+                $record.Owner.configHash = "wrong"
+            }
+            if ($scenario -eq "changed") {
+                Write-SafeStateText -Context $context -Name "agent.pid" -Content "2147483646"
+            }
+            $rejected = $false
+            $commandLock = Enter-OperatorLock -Context $context
+            try { Recover-ExitedAgentState -Context $context -Record $record | Out-Null }
+            catch { $rejected = $true }
+            finally { Exit-OperatorLock $commandLock }
+            Assert-OperatorTest $rejected "unverified state was recovered"
+            Assert-OperatorTest (Test-Path -LiteralPath (Join-Path $context.State "agent.pid")) `
+                "unverified PID state was removed"
+        }
+    }
+
+    Invoke-Case "exited recovery cannot bypass an active state lock" {
+        $oldPin = [pscustomobject]@{
+            ProcessId = 2147483647; CreationDate = "exited"; CreationTicks = [int64]1
+        }
+        Save-AgentOwner -Context $context -Pin $oldPin
+        Write-SafeStateText -Context $context -Name "agent.pid" -Content "2147483647"
+        $record = Get-AgentRecord -Context $context
+        $commandLock = Enter-OperatorLock -Context $context
+        $busyLock = Enter-StateLock -Context $context -Offset 0
+        $rejected = $false
+        try { Recover-ExitedAgentState -Context $context -Record $record | Out-Null }
+        catch { $rejected = $true }
+        finally { Exit-OperatorLock $busyLock; Exit-OperatorLock $commandLock }
+        Assert-OperatorTest $rejected "active state lock was bypassed"
+        Assert-OperatorTest (Test-Path -LiteralPath (Join-Path $context.State "agent.pid")) `
+            "busy service state was removed"
+    }
+
+    Invoke-Case "exited recovery never clears a live or reused PID" {
+        $live = Get-CimInstance Win32_Process -Filter ("ProcessId=" + $PID)
+        $livePin = New-ProcessPin -Process $live
+        Save-AgentOwner -Context $context -Pin $livePin
+        Write-SafeStateText -Context $context -Name "agent.pid" -Content ([string]$PID)
+        $record = Get-AgentRecord -Context $context
+        # Even a stale record cannot authorize cleanup after a PID appears again.
+        $record.Process = $null
+        $commandLock = Enter-OperatorLock -Context $context
+        $rejected = $false
+        try { Recover-ExitedAgentState -Context $context -Record $record | Out-Null }
+        catch { $rejected = $true }
+        finally { Exit-OperatorLock $commandLock }
+        Assert-OperatorTest $rejected "live PID state was recovered"
+        Assert-OperatorTest (Test-Path -LiteralPath (Join-Path $context.State "agent.pid")) `
+            "live PID state was removed"
+        Assert-OperatorTest ($null -ne (Get-CimInstance Win32_Process -Filter ("ProcessId=" + $PID))) `
+            "live process was terminated"
+    }
+
     Invoke-Case "reparse-point state is rejected before writes" {
         $outside = Join-Path $script:fixture "outside"
         $linkedState = Join-Path $script:fixture "linked-state"

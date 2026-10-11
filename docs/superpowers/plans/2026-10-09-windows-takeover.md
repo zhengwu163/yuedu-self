@@ -125,3 +125,18 @@ client is created; actual offline restart needs another signed device delivery.
   the full JVM suite, pre-commit gates and original-signature Windows debug build.
 - Actual new-package phone playback remains required if ADB is disconnected; never
   promote JVM response fixtures to a real model/device acceptance claim.
+
+### 2026-10-11 connected-device follow-up
+
+- Installed the original-signature 0b492795 debug APK by replacement; existing data
+  retained. Imported an original six-chapter test EPUB for multi-chapter acceptance.
+- Real startup was refused after the recorded Agent exited but left its PID and
+  owner files. Recover only absent PIDs with matching complete ownership under
+  the lifecycle command lock and exclusive state lock; recheck before removal.
+  Live/reused PIDs, changed/missing ownership and busy state remain protected.
+  Native red case reproduced missing recovery; 16 cases passed, one link-privilege
+  skip. Full service Python suite: 324, zero failures/errors, 19 skipped.
+- A red JVM queue-wiring case exposed a swallowed validated HTTP TTS rejection.
+  Propagate that typed rejection to the existing main-thread pause/error presenter.
+  Full JVM suite: 1144, zero failures/errors, eight skipped. Real playback remains
+  to be checked on the new signed package; service smoke and phone batches follow.

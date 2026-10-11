@@ -15,6 +15,11 @@ try {
         $commandLock = Enter-OperatorLock -Context $context
         Assert-OperatorState $context
         $record = Get-AgentRecord -Context $context
+        if ($null -ne $record -and $null -eq $record.Process) {
+            if (Recover-ExitedAgentState -Context $context -Record $record) {
+                $record = $null
+            }
+        }
         $ownerPath = Join-Path $context.State "agent.owner.json"
         if ($null -eq $record) {
             if (Test-Path -LiteralPath $ownerPath -PathType Leaf) {

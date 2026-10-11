@@ -37,4 +37,12 @@ class HttpReadAloudResponseWiringTest {
         assertTrue(report.contains("pauseReadAloud()"))
         assertTrue(report.contains("toastOnUi(error.localizedMessage"))
     }
+
+    @Test fun `queued playback does not swallow a validated provider rejection`() {
+        val queue = source.substringAfter("private suspend fun CoroutineScope.playDownloadQueue(")
+            .substringBefore("private suspend fun preDownloadAudios(")
+        val caught = queue.substringAfter("catch (e: Throwable)")
+        assertTrue("队列必须将固定拒绝传给主线程提示，而不能静默返回",
+            caught.contains("if (e is HttpTtsResponseException) throw e"))
+    }
 }

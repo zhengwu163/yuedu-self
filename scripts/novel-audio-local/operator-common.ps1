@@ -679,6 +679,45 @@ function Assert-StateOwner {
     }
 }
 
+function Recover-ExitedAgentState {
+    param(
+        [Parameter(Mandatory = $true)]$Context,
+        [Parameter(Mandatory = $true)]$Record
+    )
+
+    # The caller holds command byte 1. Never recover a live or unproved PID.
+    if ($null -ne $Record.Process) { return $false }
+    $owner = $Record.Owner
+    if ($null -eq $owner -or [int]$owner.pid -ne [int]$Record.Pid -or
+        [int]$Record.Pid -le 0 -or [string]::IsNullOrWhiteSpace($owner.creationDate) -or
+        [int64]$owner.creationTicks -le 0 -or
+        [string]$owner.configHash -ne (Get-ConfigHash $Context)) {
+        throw "exited agent ownership cannot be proved"
+    }
+    $oldPin = [pscustomobject]@{
+        ProcessId = [int]$Record.Pid
+        CreationDate = [string]$owner.creationDate
+        CreationTicks = [int64]$owner.creationTicks
+    }
+    $recoveryLock = $null
+    try {
+        # A still-running agent holding byte 0 must prevent cleanup, even if the
+        # recorded process has disappeared or state changed after the first read.
+        $recoveryLock = Enter-StateLock -Context $Context -Offset 0
+        Assert-StateOwner -Context $Context -AgentPid $oldPin.ProcessId -Pin $oldPin
+        $current = Get-AgentRecord -Context $Context
+        if ($null -eq $current -or $null -eq $current.Owner -or
+            $current.Pid -ne $oldPin.ProcessId -or $null -ne $current.Process) {
+            throw "exited agent state changed"
+        }
+        Assert-StateOwner -Context $Context -AgentPid $oldPin.ProcessId -Pin $oldPin
+        Clear-StaleAgentState -Context $Context
+        return $true
+    } finally {
+        Exit-OperatorLock $recoveryLock
+    }
+}
+
 function Enter-StateLock {
     param(
         [Parameter(Mandatory = $true)]$Context,

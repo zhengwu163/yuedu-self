@@ -57,6 +57,21 @@ class PowerShellContractTest(unittest.TestCase):
         # /T discovers unrecorded descendants after the identity check.
         self.assertNotIn("/T", common)
 
+    def test_dead_agent_recovery_preserves_ownership_and_lock_guards(self):
+        for name in ("start-agent.ps1", "stop-agent.ps1"):
+            with self.subTest(name=name):
+                self.assertIn("Recover-ExitedAgentState -Context $context -Record $record",
+                              self.source(name))
+        common = self.common()
+        recovery = common[common.index("function Recover-ExitedAgentState {"):]
+        recovery = recovery.split("\nfunction ", 1)[0]
+        self.assertIn("Enter-StateLock -Context $Context -Offset 0", recovery)
+        self.assertIn("Assert-StateOwner", recovery)
+        self.assertIn("Get-AgentRecord", recovery)
+        self.assertIn("$current.Process", recovery)
+        self.assertNotIn("Invoke-AgentTermination", recovery)
+        self.assertNotIn("Stop-OwnedRecords", recovery)
+
     def test_launch_waits_for_its_own_pid_with_quoted_absolute_arguments(self):
         content = (ROOT / "start-agent.ps1").read_text(encoding="utf-8")
         self.assertIn("StartupTimeoutSeconds", content)

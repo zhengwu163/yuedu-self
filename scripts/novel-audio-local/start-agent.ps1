@@ -26,6 +26,11 @@ try {
         Assert-OperatorState $context
 
         $record = Get-AgentRecord -Context $context
+        if ($null -ne $record -and $null -eq $record.Process) {
+            if (Recover-ExitedAgentState -Context $context -Record $record) {
+                $record = $null
+            }
+        }
         if ($null -ne $record) {
             if ($null -eq $record.Process -or $null -eq $record.Owner) {
                 throw "existing agent ownership cannot be proved"

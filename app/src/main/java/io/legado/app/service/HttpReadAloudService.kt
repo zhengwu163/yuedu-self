@@ -236,6 +236,7 @@ class HttpReadAloudService : BaseReadAloudService(),
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Throwable) {
+                    if (e is HttpTtsResponseException) throw e
                     // 语义对齐原实现：单段失败暂停朗读并退出装配（不抛错到 onError）
                     pauseReadAloud()
                     return
