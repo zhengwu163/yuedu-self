@@ -140,3 +140,18 @@ client is created; actual offline restart needs another signed device delivery.
   Propagate that typed rejection to the existing main-thread pause/error presenter.
   Full JVM suite: 1144, zero failures/errors, eight skipped. Real playback remains
   to be checked on the new signed package; service smoke and phone batches follow.
+
+### 2026-10-11 real chapter analysis follow-up
+
+- Original six-chapter device fixture exposed invalid new-character strings from
+  the real 9B model. Windows reproduction independently returned worker_unavailable
+  after 6.2s; direct text-only inspection identified invalid_backend_response at
+  strict protocol validation. No text or raw model output was logged.
+- A complete response example alone did not resolve reference validity. Constrain
+  generation with the llama-server JSON schema: character objects first, all unit
+  aliases required, bounded required fields and allowed speaker IDs. Keep strict
+  protocol/reference validation unchanged; do not fabricate missing characters.
+- Two regression tests added after red reproduction. Full service suite: 326,
+  zero failures/errors, 19 skipped. Real text-only analysis passed in 1.9s;
+  real Agent path passed acquire 20.1s, analyze 6.8s, release 0.6s, seven units
+  covered and two new characters. Device multi-chapter acceptance follows.

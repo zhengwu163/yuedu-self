@@ -91,6 +91,46 @@ class _FakeProcess:
 
 
 class LocalBackendTest(unittest.TestCase):
+    def test_text_generation_constrains_new_character_objects_and_unit_coverage(self):
+        sent = []
+        config = type('Config', (), {'text': type('Text', (), {
+            'model': 'fixture', 'backend_port': 11435})()})()
+        def response(payload):
+            sent.append(payload)
+            return {'choices': [{'message': {'content': json.dumps({
+                'newCharacters': [], 'assignments': {'u1': 'narrator'},
+                'aliasUpdates': [],
+            })}}]}
+        QwenTextAdapter(config, request=response).analyze({
+            'characters': [], 'units': [{'unitId': 'opaque-id', 'text': 'fixture'}],
+            'previousContext': {'recentAssignments': []},
+        })
+        schema = sent[0]['response_format']['schema']
+        self.assertFalse(schema['additionalProperties'])
+        self.assertEqual(['newCharacters', 'assignments', 'aliasUpdates'], schema['required'])
+        assignments = schema['properties']['assignments']
+        self.assertEqual(['u1'], assignments['required'])
+        character = schema['properties']['newCharacters']['items']
+        self.assertEqual('object', character['type'])
+        self.assertEqual({'temporaryId', 'displayName', 'gender', 'ageRange',
+                          'voicePersona'}, set(character['required']))
+
+    def test_text_instructions_define_complete_new_character_contract(self):
+        from qwen_backend import SYSTEM_PROMPT
+        from scripts.novel_audio_server.protocol import analysis_response, restore_model_unit_ids
+
+        # A syntactically valid list of character names is not a valid response.
+        # The model needs a complete object example, including alias updates.
+        example = json.loads(SYSTEM_PROMPT.split('\nResponse shape:\n', 1)[1])
+        request = {
+            'characters': [], 'units': [{'unitId': 'u1', 'text': 'fixture'}],
+        }
+        result = analysis_response(restore_model_unit_ids(example, {'u1': 'u1'}), request)
+        self.assertEqual(1, len(result['newCharacters']))
+        self.assertEqual(result['newCharacters'][0]['temporaryId'],
+                         result['assignments'][0]['speakerId'])
+        self.assertEqual(1, len(result['aliasUpdates']))
+
     def setUp(self):
         resource_check = patch("qwen_backend.ensure_resources")
         resource_check.start()

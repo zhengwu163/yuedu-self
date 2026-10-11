@@ -48,6 +48,52 @@ HEALTH_STATUSES = {"ok", "ready", "loading"}
 READY_STATUSES = {"ok", "ready"}
 
 
+# The compact assignment example alone leaves new character objects ambiguous.
+# Keep every required field visible to the model; validation stays strict.
+SYSTEM_PROMPT += (
+    '\nnewCharacters must contain objects, never names alone. '
+    'Use existing characterId values or new temporaryId values in assignments. '
+    'The example illustrates structure only; do not copy its sample character. '
+    'Include every input unit and all three top-level fields. '
+    '\nResponse shape:\n'
+    + json.dumps({
+        'assignments': {'u1': 'new_1'},
+        'newCharacters': [{
+            'temporaryId': 'new_1', 'displayName': 'Example character',
+            'gender': 'male', 'ageRange': 'adult',
+            'voicePersona': {'traits': ['calm']},
+        }],
+        'aliasUpdates': [{'characterId': 'new_1', 'stableAliases': []}],
+    }, ensure_ascii=False, separators=(',', ':'))
+)
+
+
+def _analysis_schema(model_request):
+    """Constrain syntax at generation time; protocol validation checks references."""
+    def obj(properties):
+        return {'type': 'object', 'properties': properties,
+                'required': list(properties), 'additionalProperties': False}
+    text = {'type': 'string', 'minLength': 1, 'maxLength': 128}
+    new_ids = [f'new_{i}' for i in range(1, len(model_request['units']) + 1)]
+    known_ids = [c['characterId'] for c in model_request['characters']]
+    speaker = {'type': 'string', 'enum': ['narrator'] + known_ids + new_ids}
+    strings = {'type': 'array', 'items': text, 'maxItems': 32}
+    character = obj({
+        'temporaryId': {'type': 'string', 'enum': new_ids},
+        'displayName': text, 'gender': text, 'ageRange': text,
+        'voicePersona': obj({'traits': strings}),
+    })
+    # Generate characters first, so later assignments can reuse their IDs.
+    return obj({
+        'newCharacters': {'type': 'array', 'items': character, 'maxItems': 64},
+        'assignments': obj({u['unitId']: speaker for u in model_request['units']}),
+        'aliasUpdates': {'type': 'array', 'maxItems': 64, 'items': obj({
+            'characterId': {'type': 'string', 'enum': known_ids + new_ids},
+            'stableAliases': strings,
+        })},
+    })
+
+
 class _NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -133,7 +179,7 @@ class QwenTextAdapter:
             ],
             "temperature": 0.1,
             "stream": False,
-            "response_format": {"type": "json_object"},
+            "response_format": {"type": "json_object", "schema": _analysis_schema(model_request)},
             "chat_template_kwargs": {"enable_thinking": False},
         }
         response = self.request(payload)
