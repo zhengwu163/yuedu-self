@@ -295,7 +295,10 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 artifacts = artifacts,
                 filesRoot = File(filesDir, AUDIO_DIRECTORY),
                 decoder = ::canDecode,
-                executionAttempt = entity.executionAttempt
+                executionAttempt = entity.executionAttempt,
+                startingSegmentIndex = segmentIndexForChapterPosition(
+                    ReadBook.durChapterPos, plan.playableSegments, currentParagraphCoordinates()
+                )
             )
         }.onSuccess { result ->
             when (result) {
@@ -609,7 +612,8 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             artifacts: List<NovelAudioSegmentArtifactEntity>,
             filesRoot: File,
             decoder: (File) -> Boolean,
-            executionAttempt: Long = 0L
+            executionAttempt: Long = 0L,
+            startingSegmentIndex: Int = 0
         ): PlaybackPreparation {
             fun blocked(
                 reason: BlockReason,
@@ -655,10 +659,15 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 if (sha256(canonical) != artifact.sha256.lowercase()) {
                     return blocked(BlockReason.CHECKSUM_MISMATCH, segment.segmentId)
                 }
-                if (!decoder(canonical)) {
-                    return blocked(BlockReason.DECODE_FAILURE, segment.segmentId)
-                }
                 files += canonical
+            }
+            // READY artifacts were fully decoded before publication. All hashes
+            // above must still match; re-decoding the whole chapter here delays
+            // cold playback. Check the starting file now, then let ExoPlayer
+            // decode subsequent files and invalidate failures in onPlayerError.
+            val startIndex = startingSegmentIndex.coerceIn(0, files.lastIndex)
+            if (!decoder(files[startIndex])) {
+                return blocked(BlockReason.DECODE_FAILURE, playableSegments[startIndex].segmentId)
             }
             return PlaybackPreparation.Ready(plan, files, executionAttempt)
         }

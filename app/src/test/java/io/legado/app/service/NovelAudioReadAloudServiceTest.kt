@@ -263,6 +263,86 @@ class NovelAudioReadAloudServiceTest {
     }
 
     @Test
+    fun verifiedChapterDoesNotDecodeEverySegmentAgainBeforeStarting() {
+        val root = Files.createTempDirectory("novel-audio-playback-start").toFile()
+        try {
+            val segments = (0 until 64).map { index ->
+                NovelAudioSegmentIntent.create(
+                    orderedRanges = listOf(NovelAudioTextRange(index, 0, 2)),
+                    text = "sample-$index"
+                )
+            }
+            val plan = testPlan(segments)
+            val files = segments.map { writeArtifact(root, plan.planId, it.segmentId, it.text) }
+            val artifacts = segments.zip(files).map { (segment, file) ->
+                artifact(plan.planId, segment.segmentId, file)
+            }
+            val decoded = mutableListOf<File>()
+            val result = NovelAudioReadAloudService.preparePlayback(
+                plan, artifacts, root, decoder = { decoded += it; true }
+            )
+            assertTrue(result is NovelAudioReadAloudService.PlaybackPreparation.Ready)
+            assertEquals("Already decoded READY files must not delay the first sound", 1, decoded.size)
+            assertEquals(files.first().canonicalFile, decoded.single())
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resumeValidatesTheStartingSegmentAndReportsItsDecoderFailure() {
+        val root = Files.createTempDirectory("novel-audio-resume-decode").toFile()
+        try {
+            val segments = (0..1).map { index ->
+                NovelAudioSegmentIntent.create(
+                    orderedRanges = listOf(NovelAudioTextRange(index, 0, 2)), text = "sample-$index"
+                )
+            }
+            val plan = testPlan(segments)
+            val files = segments.map { writeArtifact(root, plan.planId, it.segmentId, it.text) }
+            val artifacts = segments.zip(files).map { (segment, file) ->
+                artifact(plan.planId, segment.segmentId, file)
+            }
+            val decoded = mutableListOf<File>()
+            val result = NovelAudioReadAloudService.preparePlayback(
+                plan, artifacts, root, decoder = { decoded += it; false }, startingSegmentIndex = 1
+            ) as NovelAudioReadAloudService.PlaybackPreparation.Blocked
+            assertEquals(listOf(files[1].canonicalFile), decoded)
+            assertEquals(NovelAudioReadAloudService.BlockReason.DECODE_FAILURE, result.reason)
+            assertEquals(segments[1].segmentId, result.segmentId)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun coldStartStillRejectsCorruptedLaterAudioBeforeStarting() {
+        val root = Files.createTempDirectory("novel-audio-later-corruption").toFile()
+        try {
+            val segments = (0..1).map { index ->
+                NovelAudioSegmentIntent.create(
+                    orderedRanges = listOf(NovelAudioTextRange(index, 0, 2)), text = "sample-$index"
+                )
+            }
+            val plan = testPlan(segments)
+            val files = segments.map { writeArtifact(root, plan.planId, it.segmentId, it.text) }
+            val artifacts = segments.zip(files).map { (segment, file) ->
+                artifact(plan.planId, segment.segmentId, file)
+            }
+            files[1].writeText("modified")
+            var decoded = false
+            val result = NovelAudioReadAloudService.preparePlayback(
+                plan, artifacts, root, decoder = { decoded = true; true }
+            ) as NovelAudioReadAloudService.PlaybackPreparation.Blocked
+            assertEquals(NovelAudioReadAloudService.BlockReason.CHECKSUM_MISMATCH, result.reason)
+            assertEquals(segments[1].segmentId, result.segmentId)
+            assertFalse(decoded)
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    @Test
     fun preparationRejectsMissingOrInvalidArtifactWithoutSilentFallback() {
         val root = Files.createTempDirectory("novel-audio-playback-missing").toFile()
         try {
