@@ -14,6 +14,43 @@ import org.junit.Test
 import kotlinx.coroutines.runBlocking
 
 class NovelAudioAnalysisCoordinatorTest {
+    @Test fun explicitSavedVoiceDoesNotCallAutomaticMatcherAgain() = runBlocking {
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            "book://manual", 0, "c", listOf("“明天我们在哪里见面？”"),
+            rules = ReadAloudPreprocessRuleConfig().freeze())
+        val character = io.legado.app.data.entities.BookCharacter(id = 12L, bookUrl = snapshot.workKey, name = "陈远")
+        val saved = listOf(NovelAudioVoiceBinding("scope", 0L, "n", 1L),
+            NovelAudioVoiceBinding("scope", 12L, "manual", 2L))
+        val plan = NovelAudioAnalysisCoordinator(
+            analyze = { r -> ChapterAnalysisResponse(assignments = r.units.map { SpeakerAssignment(it.unitId, "12") }) },
+            voices = { listOf(io.legado.app.help.readaloud.server.VoiceAsset("n", narrator = true),
+                io.legado.app.help.readaloud.server.VoiceAsset("manual")) },
+            match = { throw AssertionError("A saved voice must not be rematched") }
+        ).analyze(snapshot, "scope", existingCharacters = listOf(character), existingBindings = saved)
+        assertEquals("manual", plan.playableSegments.single().voiceAssetId)
+        assertEquals(2L, plan.playableSegments.single().bindingRevision)
+    }
+    @Test fun batchBoundaryCarriesRealTextContextWithoutReassigningEarlierUnits() = runBlocking {
+        val snapshot = NovelAudioChapterSnapshotFactory.fromStrings(
+            "book://context", 0, "c", List(75) { "“我们明天在门口集合。$it”" },
+            rules = ReadAloudPreprocessRuleConfig().freeze())
+        val character = io.legado.app.data.entities.BookCharacter(id = 12L, bookUrl = snapshot.workKey, name = "陈远")
+        val other = character.copy(id = 9L, name = "林青")
+        val requests = mutableListOf<ChapterAnalysisRequest>()
+        val coordinator = NovelAudioAnalysisCoordinator(analyze = { request ->
+            requests += request
+            ChapterAnalysisResponse(assignments = request.units.map { unit ->
+                SpeakerAssignment(unit.unitId, if (requests.size == 1) "12" else "9")
+            })
+        })
+        val plan = coordinator.analyze(snapshot, "scope", existingCharacters = listOf(character, other))
+        assertTrue(requests.size > 1)
+        val overlap = requests[0].units.map { it.unitId }.toSet()
+            .intersect(requests[1].units.map { it.unitId }.toSet())
+        assertTrue("Opaque prior IDs alone do not tell the model who was speaking", overlap.isNotEmpty())
+        assertEquals(12L, plan.playableSegments.first().speakerId)
+        assertTrue(requests.all { it.units.size <= 64 && it.units.sumOf { unit -> unit.text.length } <= 4000 })
+    }
 
     @Test
     fun explicitReportingClauseWinsOverWrongModelSpeaker() = runBlocking {

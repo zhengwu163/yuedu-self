@@ -7,7 +7,7 @@ import io.legado.app.help.readaloud.analysis.ParsedTextUnit
 /** Explicit reporting clauses override model guesses; ambiguous clauses remain model decisions. */
 object NovelAudioSpeakerResolver {
     private const val VERB = "(?:说道|问道|答道|喊道|叫道|笑道|吼道|说|问|答|喊|叫|道)"
-    private const val MODIFIER = "(?:轻声|低声|大声|小声|冷冷地|笑着|哭着|接着|继续|又|便|才|连忙|缓缓|突然|认真地|平静地|不禁|开口|地)*"
+    private const val MODIFIER = "[^\\n。！？“”「」『』]{0,12}"
 
     fun explicitSpeaker(
         units: List<ParsedTextUnit>, index: Int,
@@ -15,9 +15,11 @@ object NovelAudioSpeakerResolver {
     ): Long? {
         val unit = units.getOrNull(index) ?: return null
         if (unit.roleType == "narrator") return 0L
-        val before = units.getOrNull(index - 1)?.takeIf { it.roleType == "narrator" }
+        val before = units.take(index).lastOrNull { it.text.isNotBlank() }
+            ?.takeIf { it.roleType == "narrator" }
             ?.text?.takeLast(80).orEmpty()
-        val after = units.getOrNull(index + 1)?.takeIf { it.roleType == "narrator" }
+        val after = units.drop(index + 1).firstOrNull { it.text.isNotBlank() }
+            ?.takeIf { it.roleType == "narrator" }
             ?.text?.take(80).orEmpty()
         val hits = characters.filter { character ->
             val names = listOf(character.name) + aliases.filter { it.characterId == character.id }.map { it.alias }

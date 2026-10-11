@@ -62,13 +62,19 @@ class NovelAudioAnalysisCoordinator(
         val knownCharacters = existingCharacters.toMutableList()
         val temporaryToFormal = mutableMapOf<String, Long>()
         var previousAssignments = emptyList<SpeakerAssignment>()
+        var contextUnits = emptyList<ParsedTextUnit>()
 
         batches.forEach { batch ->
+            val context = contextUnits.toMutableList()
+            while (context.isNotEmpty() && (context.size + batch.size > MAX_UNITS_PER_BATCH ||
+                context.sumOf { it.text.length } + batch.sumOf { it.text.length } > MAX_TEXT_UTF16)) {
+                context.removeAt(0)
+            }
             val request = buildRequest(
                 snapshot = snapshot,
                 scope = scope,
                 existingCharacters = knownCharacters,
-                units = batch,
+                units = context + batch,
                 previousAssignments = previousAssignments
             )
             val response = if (leaseId == null) {
@@ -97,7 +103,8 @@ class NovelAudioAnalysisCoordinator(
             temporaryToFormal.putAll(resolved.temporaryToCharacterId)
             knownCharacters += resolved.created
 
-            response.assignments.forEach { assignment ->
+            val newAssignments = response.assignments.filter { it.unitId !in assignmentByUnit }
+            newAssignments.forEach { assignment ->
                 val formalId = when {
                     assignment.speakerId == "narrator" -> "0"
                     assignment.speakerId.toLongOrNull() != null -> assignment.speakerId
@@ -106,7 +113,7 @@ class NovelAudioAnalysisCoordinator(
                 }
                 assignmentByUnit[assignment.unitId] = formalId
             }
-            previousAssignments = (previousAssignments + response.assignments)
+            previousAssignments = (previousAssignments + newAssignments)
                 .map { assignment ->
                     assignment.copy(
                         speakerId = when {
@@ -118,6 +125,10 @@ class NovelAudioAnalysisCoordinator(
                     )
                 }
                 .takeLast(MAX_PREVIOUS_ASSIGNMENTS)
+            contextUnits = (contextUnits + batch).takeLast(MAX_CONTEXT_UNITS)
+            while (contextUnits.sumOf { it.text.length } > MAX_CONTEXT_UTF16) {
+                contextUnits = contextUnits.drop(1)
+            }
         }
 
         val aliases = registry?.stableAliases(snapshot.workKey).orEmpty()
@@ -162,6 +173,10 @@ class NovelAudioAnalysisCoordinator(
         val result = mutableMapOf<Long, NovelAudioVoiceBinding>()
         val orderedSpeakers = listOf(0L) + speakerIds.filter { it != 0L }
         orderedSpeakers.forEach { speakerId ->
+            existingBindings.firstOrNull { it.scope == scope && it.characterId == speakerId }?.let {
+                result[speakerId] = it
+                return@forEach
+            }
             val existing = existingBindings + result.values
             // Local match deliberately excludes reserved narrator assets; do not consume a dialogue voice.
             // An older server without this optional metadata keeps its existing matching behavior.
@@ -200,8 +215,8 @@ class NovelAudioAnalysisCoordinator(
                 "one text unit exceeds the server UTF-16 budget"
             }
             val wouldExceed = current.isNotEmpty() &&
-                (current.size >= MAX_UNITS_PER_BATCH ||
-                    currentLength + unit.text.length > MAX_TEXT_UTF16)
+                (current.size >= MAX_UNITS_PER_BATCH - MAX_CONTEXT_UNITS ||
+                    currentLength + unit.text.length > MAX_TEXT_UTF16 - MAX_CONTEXT_UTF16)
             if (wouldExceed) {
                 batches += current
                 current = mutableListOf()
@@ -293,5 +308,7 @@ class NovelAudioAnalysisCoordinator(
         const val MAX_ALIASES_PER_CHARACTER = 32
         const val MAX_ALIAS_LENGTH = 128
         const val MAX_PREVIOUS_ASSIGNMENTS = 32
+        private const val MAX_CONTEXT_UNITS = 8
+        private const val MAX_CONTEXT_UTF16 = 500
     }
 }

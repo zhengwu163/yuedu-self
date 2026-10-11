@@ -25,4 +25,12 @@ class NovelAudioSpeakerResolverTest {
         val units = units("陈远说道：“明天在哪里见面？”林青问道。")
         assertNull(NovelAudioSpeakerResolver.explicitSpeaker(units, 1, roles, emptyList()))
     }
+
+    @Test fun paragraphSeparatorAndNaturalSpeechModifierDoNotHideReportingCue() {
+        val units = NovelAudioChapterSnapshotFactory.fromStrings(
+            "book", 0, "c", listOf("陈远疑惑地问道：", "“明天在哪里见面？”"),
+            rules = ReadAloudPreprocessRuleConfig().freeze()).parseUnits()
+        val quote = units.indexOfFirst { it.roleType == "character" }
+        assertEquals(12L, NovelAudioSpeakerResolver.explicitSpeaker(units, quote, roles, emptyList()))
+    }
 }
