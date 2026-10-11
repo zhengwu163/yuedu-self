@@ -22,8 +22,22 @@ try {
     Assert-Desktop ($process.ExitCode -eq 0)
     $stop = @(Get-DesktopArguments -Action stop -ScriptRoot $fixture -ConfigPath $config)
     Assert-Desktop (-not ($stop -contains '-StartupTimeoutSeconds'))
-    $command = Get-DesktopAutostartCommand -ScriptRoot $fixture -ConfigPath $config
+    $command = '"' + (Get-DesktopPowerShell) + '" -nop -sta -w Hidden -ep Bypass -File "' +
+        (Join-Path $fixture 'desktop.ps1') + '" -ConfigPath "' + $config + '" -StartAgent'
     Assert-Desktop ($command.Contains('"' + $config + '"') -and $command.Contains('-StartAgent'))
+    if ($command.Length -gt 260) {
+        $rejectedLong = $false
+        try { Get-DesktopAutostartCommand -ScriptRoot $fixture -ConfigPath $config | Out-Null }
+        catch { $rejectedLong = $_.Exception.Message -eq 'desktop_autostart_path_too_long' }
+        Assert-Desktop $rejectedLong
+    } else {
+        Assert-Desktop ((Get-DesktopAutostartCommand -ScriptRoot $fixture -ConfigPath $config) -ceq $command)
+    }
+    $commandArgs = $command.Substring(('"' + (Get-DesktopPowerShell) + '" ').Length)
+    $process = Start-Process -FilePath (Get-DesktopPowerShell) -ArgumentList $commandArgs -WindowStyle Hidden -PassThru
+    $handle = $process.Handle
+    $process.WaitForExit()
+    Assert-Desktop ($process.ExitCode -eq 0)
     $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($registryPath)
     $key.SetValue('Unrelated', 'preserve')
     Set-DesktopAutostartValue -Key $key -Command $command -Enabled $true

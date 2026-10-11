@@ -12,6 +12,11 @@ import splitties.init.appCtx
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /**
  * 当前章与后续章共用的准备环境。
@@ -69,7 +74,20 @@ internal class NovelAudioPreparationEnvironment private constructor(
                 permit = permit
             )
         } catch (error: Throwable) {
-            permit.close()
+            try {
+                if (error is CancellationException) {
+                    withContext(NonCancellable) {
+                        kotlin.runCatching {
+                            withTimeout(30_000) {
+                                NovelAudioRuntimeReleaseRecovery.awaitIdle(
+                                    status = client::runtimeStatus,
+                                    pause = { delay(200) }
+                                )
+                            }
+                        }.onFailure { AppLog.put("AI 听书取消加载清理失败", it) }
+                    }
+                }
+            } finally { permit.close() }
             throw error
         }
     }
@@ -195,7 +213,15 @@ internal class NovelAudioPreparationBatch internal constructor(
         try {
             if (leaseId.isNullOrBlank()) return
             kotlin.runCatching {
-                client.releaseRuntime(leaseId)
+                withContext(NonCancellable) {
+                    withTimeout(30_000) {
+                        NovelAudioRuntimeReleaseRecovery.finish(
+                            release = { client.releaseRuntime(leaseId) },
+                            status = client::runtimeStatus,
+                            pause = { delay(200) }
+                        )
+                    }
+                }
             }.onFailure {
                 AppLog.put("AI 听书运行时释放失败", it)
             }

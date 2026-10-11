@@ -35,8 +35,15 @@ function Start-DesktopOperator {
 
 function Get-DesktopAutostartCommand {
     param([string]$ScriptRoot, [string]$ConfigPath)
-    $line = ConvertTo-DesktopArgumentLine @(Get-DesktopArguments -Action tray -ScriptRoot $ScriptRoot -ConfigPath $ConfigPath)
-    return ('"' + (Get-DesktopPowerShell) + '" ' + $line)
+    # Run values are limited to 260 characters. Validate the same file arguments,
+    # then use native PowerShell 5.1 host aliases instead of the verbose launch.
+    $arguments = @(Get-DesktopArguments -Action tray -ScriptRoot $ScriptRoot -ConfigPath $ConfigPath)
+    $fileIndex = [Array]::IndexOf($arguments, '-File')
+    $configIndex = [Array]::IndexOf($arguments, '-ConfigPath')
+    $command = '"' + (Get-DesktopPowerShell) + '" -nop -sta -w Hidden -ep Bypass -File "' +
+        $arguments[$fileIndex + 1] + '" -ConfigPath "' + $arguments[$configIndex + 1] + '" -StartAgent'
+    if ($command.Length -gt 260) { throw 'desktop_autostart_path_too_long' }
+    return $command
 }
 
 function Set-DesktopAutostartValue {

@@ -15,7 +15,7 @@ class DesktopTest(unittest.TestCase):
             capture_output=True, timeout=60,
         )
         self.assertEqual(0, result.returncode, "desktop fixture failed")
-        self.assertIn(b"desktop_tests_passed=11", result.stdout)
+        self.assertIn(b"desktop_tests_passed=13", result.stdout)
 
     def test_desktop_scripts_ship_in_source_bundle(self):
         from package_service import SOURCE_FILES

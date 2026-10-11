@@ -52,4 +52,13 @@ class NovelAudioRuntimeLeaseWiringTest {
         assertTrue(environment.contains("private val runtimeBatchLane = NovelAudioRuntimeBatchLane()"))
         assertTrue(environment.contains("finally { permit.close() }"))
     }
+
+    @Test
+    fun `busy cancelled generation is drained before lane opens`() {
+        val environment = source("help/readaloud/novel/NovelAudioPreparationEnvironment.kt")
+        assertTrue(environment.contains("NovelAudioRuntimeReleaseRecovery.finish("))
+        assertTrue(environment.contains("status = client::runtimeStatus"))
+        assertTrue(environment.contains("withContext(NonCancellable)"))
+        assertTrue(environment.contains("withTimeout(30_000)"))
+    }
 }
