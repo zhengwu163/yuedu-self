@@ -11,6 +11,37 @@ class NovelAudioTakeoverRegressionTest {
 
     private fun source(path: String) = File(root, "io/legado/app/$path").readText()
 
+    @Test fun resumingAPausedLoadedChapterPreparesTheIdleAudioPlayer() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val resume = service.substringAfter("override fun resumeReadAloud()")
+            .substringBefore("override fun upSpeechRate")
+        assertTrue("Resume must share play's focus, wake lock and STATE_IDLE prepare path",
+            resume.contains("play()") && !resume.contains("exoPlayer.play()"))
+    }
+
+    @Test fun adjacentChapterButtonsPreserveTheRequestedPauseState() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        val dispatch = service.substringAfter("override fun onStartCommand")
+            .substringBefore("private fun navigateFrozenChapter")
+        for (action in listOf("prev", "next")) {
+            val handler = dispatch.substringAfter("IntentAction.$action ->", "")
+                .substringBefore("return super.onStartCommand(null, flags, startId)")
+            assertTrue("Adjacent chapter buttons must keep paused playback out of legacy assembly: $action",
+                handler.contains("navigateFrozenRelativeChapter") &&
+                    handler.contains("getBooleanExtra(\"continuePlayback\""))
+        }
+    }
+
+    @Test fun automaticContinuationUsesFrozenNavigationInsteadOfLegacyAssembly() {
+        val service = source("service/NovelAudioReadAloudService.kt")
+        for ((method, following) in listOf("prevChapter" to "nextChapter", "nextChapter" to "onPlaybackStateChanged")) {
+            val body = service.substringAfter("override fun $method()")
+                .substringBefore("override fun $following")
+            assertTrue("Frozen continuation must not use BaseReadAloudService's text assembly: $method",
+                body.contains("navigateFrozenRelativeChapter") && !body.contains("super.$method()"))
+        }
+    }
+
     @Test fun frozenPlayerOwnsSeekAndChapterSelection() {
         val service = source("service/NovelAudioReadAloudService.kt")
         val dispatch = service.substringAfter("override fun onStartCommand")

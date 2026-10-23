@@ -64,11 +64,17 @@ class NovelAudioAutoPrefetchWiringTest {
 
     @Test
     fun `chapter navigation does not leave a stale auto window`() {
+        val relative = method(service, "navigateFrozenRelativeChapter")
+        val navigation = method(service, "navigateFrozenChapter")
+        assertTrue(relative.contains("navigateFrozenChapter("))
+        assertTrue("冻结音频定位必须先撤销旧窗口，再加载新章",
+            navigation.indexOf("playStop()") >= 0 &&
+                navigation.indexOf("playStop()") < navigation.indexOf("ReadBook.openChapter("))
         listOf("prevChapter", "nextChapter").forEach { name ->
             val body = method(service, name)
             assertTrue(
-                "$name 必须经 playStop 撤销旧窗口",
-                body.contains("playStop()")
+                "$name 必须经过统一冻结音频定位撤销旧窗口",
+                body.contains("navigateFrozenRelativeChapter(")
             )
         }
     }

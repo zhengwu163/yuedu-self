@@ -148,6 +148,20 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                 return super.onStartCommand(null, flags, startId)
             }
 
+            IntentAction.prev -> {
+                navigateFrozenRelativeChapter(
+                    -1, intent.getBooleanExtra("continuePlayback", BaseReadAloudService.isPlay()), flags
+                )
+                return super.onStartCommand(null, flags, startId)
+            }
+
+            IntentAction.next -> {
+                navigateFrozenRelativeChapter(
+                    1, intent.getBooleanExtra("continuePlayback", BaseReadAloudService.isPlay()), flags
+                )
+                return super.onStartCommand(null, flags, startId)
+            }
+
             IntentAction.moveTo -> {
                 dispatchPlayback(
                     intent.getStringExtra(AudioPrefetchPlayback.REQUEST),
@@ -189,6 +203,25 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
             }
         }
         return super.onStartCommand(intent, flags, startId)
+    }
+
+    /** Manual and automatic chapter changes share frozen playback and its authorization. */
+    private fun navigateFrozenRelativeChapter(delta: Int, play: Boolean, flags: Int = 0) {
+        if (flags and (START_FLAG_REDELIVERY or START_FLAG_RETRY) != 0) return
+        val bookUrl = ReadBook.book?.bookUrl ?: return
+        val chapter = ReadBook.durChapterIndex + delta
+        if (chapter < 0) return
+        if (chapter >= ReadBook.chapterSize) {
+            if (delta > 0) {
+                pauseReadAloud()
+                stopSelf()
+            }
+            return
+        }
+        if (delta > 0) ReadBook.upReadTime()
+        dispatchPlayback(
+            null, AudioPrefetchPlayback.lifecycle.continuation(bookUrl), flags
+        ) { work -> navigateFrozenChapter(chapter, 0, play, work) }
     }
 
     /** Legacy text assembly clears this service's frozen player and cannot rebuild it. */
@@ -248,11 +281,12 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     }
 
     override fun resumeReadAloud() {
-        super.resumeReadAloud()
+        // Paused navigation installs media items without preparing the player.
+        // Reuse the same focus/wake-lock/STATE_IDLE preparation as initial play.
         if (prepared != null) {
-            publishSegmentProgress()
-            exoPlayer.play()
-            publishPlaybackState(ReadAloudPlaybackState.PHASE_PLAYING, playing = true)
+            play()
+        } else {
+            super.resumeReadAloud()
         }
     }
 
@@ -267,13 +301,11 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     }
 
     override fun prevChapter() {
-        playStop()
-        super.prevChapter()
+        navigateFrozenRelativeChapter(-1, play = !pause)
     }
 
     override fun nextChapter() {
-        playStop()
-        super.nextChapter()
+        navigateFrozenRelativeChapter(1, play = !pause)
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
