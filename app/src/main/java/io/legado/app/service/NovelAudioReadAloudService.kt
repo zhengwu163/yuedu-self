@@ -143,7 +143,7 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
                     intent.getStringExtra(AudioPrefetchPlayback.CONTINUATION),
                     flags
                 ) {
-                    if (prepared == null) prepareAndPlay(it) else resumeReadAloud()
+                    resumeFrozenPlayback(it)
                 }
                 return super.onStartCommand(null, flags, startId)
             }
@@ -296,8 +296,33 @@ class NovelAudioReadAloudService : BaseReadAloudService(), Player.Listener {
     }
 
     override fun onUserResumeFromMedia(work: AudioPrefetchLifecycle.Work): Boolean {
-        if (prepared == null) prepareAndPlay(work) else resumeReadAloud()
+        resumeFrozenPlayback(work)
         return true
+    }
+
+    private fun resumeFrozenPlayback(work: AudioPrefetchLifecycle.Work?) {
+        val local = prepared
+        if (local == null || local.plan.physicalBookUrl != ReadBook.book?.bookUrl ||
+            local.plan.chapterIndex != ReadBook.durChapterIndex
+        ) {
+            prepareAndPlay(work)
+            return
+        }
+        resumeReadAloud()
+        // Pause revoked AUTO. Only a fresh user action can grant its replacement;
+        // focus/call recovery still uses resumeReadAloud without authorizing IO.
+        if (pause || work == null || !AudioPrefetchPlayback.lifecycle.isCurrent(work)) return
+        prefetchAssembled(
+            work = work,
+            bookUrl = local.plan.physicalBookUrl,
+            chapterIndex = local.plan.chapterIndex,
+            chapterCount = ReadBook.curTextChapter?.chaptersSize ?: (local.plan.chapterIndex + 1)
+        )
+        NovelAudioAutoPrefetchDriver.onChapterReady(
+            work = work,
+            bookUrl = local.plan.physicalBookUrl,
+            chapterIndex = local.plan.chapterIndex
+        )
     }
 
     override fun prevChapter() {
