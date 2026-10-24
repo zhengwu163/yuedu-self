@@ -2196,6 +2196,7 @@ private data class LyricsTarget(
     val paragraphs: List<ReadAloudPlayerPanel.ParagraphUi>
 )
 
+@androidx.annotation.Keep
 internal data class PlayerColors(
     val night: Boolean,
     val background: Color,
@@ -2258,8 +2259,13 @@ private data class PlayerChapterModel(
 
 @Composable
 internal fun rememberPlayerColors(palette: ReaderSheetStyle.Palette): PlayerColors {
+    return resolvePlayerColors(palette, AppConfig.isNightTheme)
+}
+
+@androidx.annotation.Keep
+internal fun resolvePlayerColors(palette: ReaderSheetStyle.Palette, forceNight: Boolean): PlayerColors {
     val accent = Color(palette.accentColor)
-    val night = AppConfig.isNightTheme || !ColorUtils.isColorLight(palette.surface)
+    val night = forceNight || !ColorUtils.isColorLight(palette.surface)
     val panel = if (night) {
         Color(ColorUtils.blendColors(palette.panel, android.graphics.Color.BLACK, 0.50f))
     } else {
@@ -2270,19 +2276,23 @@ internal fun rememberPlayerColors(palette: ReaderSheetStyle.Palette): PlayerColo
     } else {
         Color(ColorUtils.blendColors(palette.panelStrong, android.graphics.Color.WHITE, 0.88f))
     }
-    return PlayerColors(
-        night = night,
-        background = if (night) {
+    val background = if (night) {
             Color(ColorUtils.blendColors(palette.surface, android.graphics.Color.BLACK, 0.68f))
         } else {
             Color(ColorUtils.blendColors(palette.surface, android.graphics.Color.WHITE, 0.72f))
-        },
+        }
+    val surfaces = listOf(background, panel, panelStrong)
+    val dayText = Color(io.legado.app.lib.theme.defaultThemeTextColor(false))
+    val nightText = Color(io.legado.app.lib.theme.defaultThemeTextColor(true))
+    return PlayerColors(
+        night = night,
+        background = background,
         panel = panel,
         panelStrong = panelStrong,
         panelBorder = Color.Transparent,
-        primaryText = Color(palette.textColor).copy(alpha = 0.94f),
-        secondaryText = Color(palette.secondaryTextColor).copy(alpha = 0.88f),
-        subtleText = Color(palette.secondaryTextColor).copy(alpha = 0.66f),
+        primaryText = readablePlayerTextColor(Color(palette.textColor).copy(alpha = 0.94f), surfaces, dayText, nightText),
+        secondaryText = readablePlayerTextColor(Color(palette.secondaryTextColor).copy(alpha = 0.88f), surfaces, dayText, nightText),
+        subtleText = readablePlayerTextColor(Color(palette.secondaryTextColor).copy(alpha = 0.66f), surfaces, dayText, nightText),
         accent = accent,
         accentText = if (ColorUtils.isColorLight(palette.accentColor)) Color.Black else Color.White,
         fluidA = accent,

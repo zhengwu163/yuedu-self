@@ -20,6 +20,16 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -57,8 +67,12 @@ import io.legado.app.help.readaloud.server.NovelAudioServerConfigStore
 import io.legado.app.help.readaloud.server.NovelAudioServerSettings
 import io.legado.app.lib.theme.ThemeRuntimeKeys
 import io.legado.app.lib.theme.ThemeStore
+import io.legado.app.lib.theme.bottomBackground
 import io.legado.app.lib.theme.UiCorner
 import io.legado.app.ui.book.read.config.NovelAudioServerConfigDialog
+import io.legado.app.ui.book.read.config.ReaderSheetStyle
+import io.legado.app.ui.book.read.PlayerColors
+import io.legado.app.ui.book.read.resolvePlayerColors
 import io.legado.app.ui.theme.ThemeSync
 import io.legado.app.utils.ColorUtils
 import io.legado.app.utils.GSON
@@ -297,6 +311,96 @@ class NovelAudioThemeDeviceTest {
             failures.attempt("assert host factory restored") {
                 assertSame(originalFactory, NovelAudioDialogHostActivity.factory)
             }
+        }
+        failures.throwIfAny()
+    }
+
+    @Test
+    fun playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertTrue(context.applicationContext is NovelAudioThemeTestApplication)
+        val failures = ThemeTestFailures()
+        val id = UUID.randomUUID().toString()
+        var snapshot: ThemeDeviceSnapshot? = null
+        var scenario: ActivityScenario<NovelAudioDialogHostActivity>? = null
+        var library: ThemeLibraryFixture? = null
+        try {
+            onThemeMain {
+                snapshot = ThemeDeviceSnapshot.capture(context)
+                snapshot!!.protectBackgroundFiles()
+            }
+            val localLibrary = ThemeLibraryFixture(context, id)
+            library = localLibrary
+            val day = ThemePackageManager.builtinEntryForKit(false)
+            val night = ThemePackageManager.builtinEntryForKit(true)
+            val state = mutableStateOf(ReaderSheetStyle.resolve(context, context.bottomBackground) to AppConfig.isNightTheme)
+            var rendered: PlayerColors? = null
+            lateinit var view: ComposeView
+            lateinit var host: NovelAudioDialogHostActivity
+            val launched = ActivityScenario.launch(NovelAudioDialogHostActivity::class.java)
+            scenario = launched
+            launched.onThemeActivity {
+                host = it
+                view = ComposeView(it)
+                it.setContentView(view)
+                view.setContent {
+                    val colors = resolvePlayerColors(state.value.first, state.value.second)
+                    SideEffect { rendered = colors }
+                    Column(Modifier.background(colors.background).padding(16.dp)) {
+                        Text("主文字 Aa", color = colors.primaryText, fontSize = 28.sp)
+                        Text("辅助文字 Aa", color = colors.secondaryText, fontSize = 24.sp)
+                        Text("弱化文字 Aa", color = colors.subtleText, fontSize = 24.sp)
+                    }
+                }
+            }
+            val directory = File(context.getExternalFilesDir(null), "novel-audio-player-theme/$id")
+            check(directory.mkdirs())
+            fun capture(name: String, darkBase: Boolean = false) {
+                onThemeMain {
+                    val palette = if (darkBase) ReaderSheetStyle.resolve(host, android.graphics.Color.BLACK)
+                        else ReaderSheetStyle.resolve(host, host.bottomBackground)
+                    state.value = palette to AppConfig.isNightTheme
+                }
+                rule.waitForIdle()
+                val colors = requireNotNull(rendered)
+                val values = listOf("主文字 Aa" to colors.primaryText,
+                    "辅助文字 Aa" to colors.secondaryText, "弱化文字 Aa" to colors.subtleText)
+                values.forEachIndexed { index, (label, foreground) ->
+                    val image = captureDialogNode(rule.onNodeWithText(label), host.window, view)
+                    FileOutputStream(File(directory, "$name-$index.png")).use {
+                        check(image.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    val background = Color(dominantThemePixel(image))
+                    val expected = foreground.compositeOver(background)
+                    val ratio = androidx.core.graphics.ColorUtils.calculateContrast(
+                        expected.toArgb(), background.toArgb() or -0x1000000)
+                    assertTrue("$name/$index text contrast must reach 4.5, actual=$ratio", ratio >= 4.5)
+                    val pixels = image.toPixelMap()
+                    var glyphPixels = 0
+                    for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                        if (closeThemeColor(pixels[x, y], expected)) glyphPixels++
+                    }
+                    assertTrue("$name/$index must really render its foreground", glyphPixels >= 10)
+                }
+            }
+            applyEntry(host, day)
+            capture("01-default")
+            onThemeMain {
+                ThemeConfig.applyConfig(host, requireNotNull(day.packageInfo.config).copy(accentColor = "#00796B"),
+                    switchNightMode = false, notify = false)
+                ThemeConfig.applyTheme(host)
+            }
+            capture("02-custom-accent")
+            applyEntry(host, localLibrary.create())
+            capture("03-local-package")
+            applyEntry(host, night)
+            capture("04-night")
+            applyEntry(host, day)
+            capture("05-derived-dark-day-text", darkBase = true)
+        } finally {
+            failures.attempt("close player theme host") { scenario?.close() }
+            failures.attempt("restore player theme library") { library?.restore(failures) }
+            failures.attempt("restore player theme runtime") { snapshot?.restore(context, failures) }
         }
         failures.throwIfAny()
     }

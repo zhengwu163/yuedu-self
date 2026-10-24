@@ -269,6 +269,7 @@ git_log.txt
 !/ai_tests/scripts/audit_theme_token_violation.py
 !/ai_tests/scripts/audit_host_refresh_coverage.py
 !/ai_tests/scripts/test_novel_audio_resume_prefetch.py
+!/ai_tests/scripts/test_novel_audio_player_contrast.py
 !/ai_tests/scripts/hooks/
 /ai_tests/scripts/hooks/*
 !/ai_tests/scripts/hooks/pre-commit
