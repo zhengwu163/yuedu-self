@@ -17,7 +17,8 @@ class NovelAudioThemeTestRunner : AndroidJUnitRunner() {
     override fun onCreate(arguments: Bundle) {
         val selector = arguments.getString(CLASS_ARGUMENT)
         check(selector == TARGET_TEST || selector == "$TARGET_TEST#$TARGET_METHOD" ||
-            selector == "$TARGET_TEST#playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface") {
+            selector == "io.legado.app.NovelAudioPlayerThemeDeviceTest" ||
+            selector == "io.legado.app.NovelAudioPlayerThemeDeviceTest#playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface") {
             "NovelAudioThemeTestRunner requires an explicit class selector for $TARGET_TEST"
         }
         check(!arguments.containsKey("testFile") && !arguments.containsKey("package")) {

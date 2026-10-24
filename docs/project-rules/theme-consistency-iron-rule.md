@@ -77,4 +77,4 @@ ai_tests/venv/bin/python -B scripts/test_theme_token_audit.py -v
 
 听书播放器会在阅读面板调色板上进一步压暗或提亮容器。正文、辅助和弱化文字必须针对最终容器复核透明度合成后的对比度，不能只沿用原调色板文字色。撞色时复用现有昼夜默认文字色，保留已可读的自定义颜色，不写回用户主题。
 
-`ReadAloudPlayerPanelColorsTest` 与 `PlayerTextContrastTest` 覆盖暗底黑字、正常日夜文字、自定义色与透明度；`NovelAudioThemeDeviceTest.playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface` 使用真实颜色工厂，记录默认、自定义强调色、主题包、夜间及日间文字配派生暗底的实机像素。`ai_tests/scripts/test_novel_audio_player_contrast.py` 补充实际播放器控件像素检查，不读取或输出小说正文。静态硬编码颜色门禁仍不能代替这些对比度验证。
+`ReadAloudPlayerPanelColorsTest` 与 `PlayerTextContrastTest` 覆盖暗底黑字、正常日夜文字、自定义色与透明度；`NovelAudioPlayerThemeDeviceTest.playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface` 使用真实颜色工厂，记录默认、自定义强调色、主题包、夜间及日间文字配派生暗底的实机像素。`ai_tests/scripts/test_novel_audio_player_contrast.py` 补充实际播放器控件像素检查，不读取或输出小说正文。静态硬编码颜色门禁仍不能代替这些对比度验证。

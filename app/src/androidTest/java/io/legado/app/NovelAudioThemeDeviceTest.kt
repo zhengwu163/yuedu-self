@@ -10,6 +10,8 @@ import android.os.Looper
 import android.system.Os
 import android.view.PixelCopy
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.view.ViewTreeObserver
 import android.view.Window
 import android.view.WindowManager
@@ -20,16 +22,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Text
-import androidx.compose.runtime.SideEffect
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -315,96 +307,6 @@ class NovelAudioThemeDeviceTest {
         failures.throwIfAny()
     }
 
-    @Test
-    fun playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        assertTrue(context.applicationContext is NovelAudioThemeTestApplication)
-        val failures = ThemeTestFailures()
-        val id = UUID.randomUUID().toString()
-        var snapshot: ThemeDeviceSnapshot? = null
-        var scenario: ActivityScenario<NovelAudioDialogHostActivity>? = null
-        var library: ThemeLibraryFixture? = null
-        try {
-            onThemeMain {
-                snapshot = ThemeDeviceSnapshot.capture(context)
-                snapshot!!.protectBackgroundFiles()
-            }
-            val localLibrary = ThemeLibraryFixture(context, id)
-            library = localLibrary
-            val day = ThemePackageManager.builtinEntryForKit(false)
-            val night = ThemePackageManager.builtinEntryForKit(true)
-            val state = mutableStateOf(ReaderSheetStyle.resolve(context, context.bottomBackground) to AppConfig.isNightTheme)
-            var rendered: PlayerColors? = null
-            lateinit var view: ComposeView
-            lateinit var host: NovelAudioDialogHostActivity
-            val launched = ActivityScenario.launch(NovelAudioDialogHostActivity::class.java)
-            scenario = launched
-            launched.onThemeActivity {
-                host = it
-                view = ComposeView(it)
-                it.setContentView(view)
-                view.setContent {
-                    val colors = resolvePlayerColors(state.value.first, state.value.second)
-                    SideEffect { rendered = colors }
-                    Column(Modifier.background(colors.background).padding(16.dp)) {
-                        Text("主文字 Aa", color = colors.primaryText, fontSize = 28.sp)
-                        Text("辅助文字 Aa", color = colors.secondaryText, fontSize = 24.sp)
-                        Text("弱化文字 Aa", color = colors.subtleText, fontSize = 24.sp)
-                    }
-                }
-            }
-            val directory = File(context.getExternalFilesDir(null), "novel-audio-player-theme/$id")
-            check(directory.mkdirs())
-            fun capture(name: String, darkBase: Boolean = false) {
-                onThemeMain {
-                    val palette = if (darkBase) ReaderSheetStyle.resolve(host, android.graphics.Color.BLACK)
-                        else ReaderSheetStyle.resolve(host, host.bottomBackground)
-                    state.value = palette to AppConfig.isNightTheme
-                }
-                rule.waitForIdle()
-                val colors = requireNotNull(rendered)
-                val values = listOf("主文字 Aa" to colors.primaryText,
-                    "辅助文字 Aa" to colors.secondaryText, "弱化文字 Aa" to colors.subtleText)
-                values.forEachIndexed { index, (label, foreground) ->
-                    val image = captureDialogNode(rule.onNodeWithText(label), host.window, view)
-                    FileOutputStream(File(directory, "$name-$index.png")).use {
-                        check(image.asAndroidBitmap().compress(Bitmap.CompressFormat.PNG, 100, it))
-                    }
-                    val background = Color(dominantThemePixel(image))
-                    val expected = foreground.compositeOver(background)
-                    val ratio = androidx.core.graphics.ColorUtils.calculateContrast(
-                        expected.toArgb(), background.toArgb() or -0x1000000)
-                    assertTrue("$name/$index text contrast must reach 4.5, actual=$ratio", ratio >= 4.5)
-                    val pixels = image.toPixelMap()
-                    var glyphPixels = 0
-                    for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
-                        if (closeThemeColor(pixels[x, y], expected)) glyphPixels++
-                    }
-                    assertTrue("$name/$index must really render its foreground", glyphPixels >= 10)
-                }
-            }
-            applyEntry(host, day)
-            capture("01-default")
-            onThemeMain {
-                ThemeConfig.applyConfig(host, requireNotNull(day.packageInfo.config).copy(accentColor = "#00796B"),
-                    switchNightMode = false, notify = false)
-                ThemeConfig.applyTheme(host)
-            }
-            capture("02-custom-accent")
-            applyEntry(host, localLibrary.create())
-            capture("03-local-package")
-            applyEntry(host, night)
-            capture("04-night")
-            applyEntry(host, day)
-            capture("05-derived-dark-day-text", darkBase = true)
-        } finally {
-            failures.attempt("close player theme host") { scenario?.close() }
-            failures.attempt("restore player theme library") { library?.restore(failures) }
-            failures.attempt("restore player theme runtime") { snapshot?.restore(context, failures) }
-        }
-        failures.throwIfAny()
-    }
-
     private fun applyEntry(context: Context, entry: ThemePackageManager.Entry) {
         runBlocking(Dispatchers.Main) {
             AppConfig.themeMode = if (entry.packageInfo.isNightTheme) "2" else "1"
@@ -618,6 +520,142 @@ class NovelAudioThemeDeviceTest {
         const val TITLE = "AI 多角色听书服务"
         const val DIALOG_TAG = "novel-audio-theme-device-test"
         const val ADDRESS = "https://theme-fixture.invalid/"
+    }
+}
+
+/** Native pixel host avoids sharing Espresso/Compose-test internals with the shrunk app.
+ * It exercises the real player palette factory; the real player also has an ADB pixel check.
+ */
+@RunWith(AndroidJUnit4::class)
+@SdkSuppress(minSdkVersion = 26)
+class NovelAudioPlayerThemeDeviceTest {
+    @Test(timeout = 180000)
+    fun playerTextStaysReadableAcrossFourThemesAndDarkDerivedSurface() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        assertTrue(context.applicationContext is NovelAudioThemeTestApplication)
+        val failures = ThemeTestFailures()
+        val id = UUID.randomUUID().toString()
+        var snapshot: ThemeDeviceSnapshot? = null
+        var library: ThemeLibraryFixture? = null
+        var scenario: ActivityScenario<NovelAudioDialogHostActivity>? = null
+        try {
+            onThemeMain {
+                snapshot = ThemeDeviceSnapshot.capture(context)
+                snapshot!!.protectBackgroundFiles()
+            }
+            val localLibrary = ThemeLibraryFixture(context, id)
+            library = localLibrary
+            val day = ThemePackageManager.builtinEntryForKit(false)
+            val night = ThemePackageManager.builtinEntryForKit(true)
+            // Avoid a synthetic MAIN/LAUNCHER intent: MIUI intercepts it as an external launch.
+            val launched = ActivityScenario.launch<NovelAudioDialogHostActivity>(
+                android.content.Intent(context, NovelAudioDialogHostActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            scenario = launched
+            lateinit var host: NovelAudioDialogHostActivity
+            lateinit var root: LinearLayout
+            lateinit var labels: List<TextView>
+            launched.onActivity {
+                host = it
+                root = LinearLayout(it).apply { orientation = LinearLayout.VERTICAL }
+                labels = listOf("主文字 Aa", "辅助文字 Aa", "弱化文字 Aa").map { label ->
+                    TextView(it).apply { text = label; textSize = 28f; setPadding(24, 24, 24, 24) }
+                }
+                labels.forEach { view -> root.addView(view) }
+                it.setContentView(root)
+            }
+            val directory = File(context.getExternalFilesDir(null), "novel-audio-player-theme/$id")
+            check(directory.mkdirs())
+            fun apply(entry: ThemePackageManager.Entry) {
+                runBlocking(Dispatchers.Main) {
+                    AppConfig.themeMode = if (entry.packageInfo.isNightTheme) "2" else "1"
+                    AppConfig.isEInkMode = false
+                    ThemePackageManager.apply(host, entry, switchNightMode = false, notify = false)
+                    ThemeConfig.applyTheme(host)
+                }
+            }
+            fun capture(name: String, darkBase: Boolean = false) {
+                lateinit var colors: PlayerColors
+                onThemeMain {
+                    val base = if (darkBase) android.graphics.Color.BLACK else host.bottomBackground
+                    colors = resolvePlayerColors(ReaderSheetStyle.resolve(host, base), AppConfig.isNightTheme)
+                    root.setBackgroundColor(colors.background.toArgb())
+                    val foregrounds = listOf(colors.primaryText, colors.secondaryText, colors.subtleText)
+                    labels.forEachIndexed { index, view ->
+                        view.setBackgroundColor(colors.background.toArgb())
+                        view.setTextColor(foregrounds[index].toArgb())
+                    }
+                }
+                InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                val foregrounds = listOf(colors.primaryText, colors.secondaryText, colors.subtleText)
+                labels.forEachIndexed { index, view ->
+                    val bitmap = copyPlayerView(host.window, view)
+                    FileOutputStream(File(directory, "$name-$index.png")).use {
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    val counts = mutableMapOf<Int, Int>()
+                    for (y in 0 until bitmap.height) for (x in 0 until bitmap.width) {
+                        val pixel = bitmap.getPixel(x, y)
+                        counts[pixel] = (counts[pixel] ?: 0) + 1
+                    }
+                    val background = requireNotNull(counts.maxByOrNull { it.value }).key
+                    val foreground = androidx.core.graphics.ColorUtils.compositeColors(
+                        foregrounds[index].toArgb(), background)
+                    val ratio = androidx.core.graphics.ColorUtils.calculateContrast(foreground, background)
+                    assertTrue("$name/$index text contrast must reach 4.5, actual=$ratio", ratio >= 4.5)
+                    assertTrue("$name/$index must actually draw its foreground", counts.entries.any {
+                        closeThemeColor(Color(it.key), Color(foreground)) && it.value >= 10
+                    })
+                    bitmap.recycle()
+                }
+            }
+            apply(day); capture("01-default")
+            onThemeMain {
+                ThemeConfig.applyConfig(host, requireNotNull(day.packageInfo.config).copy(accentColor = "#00796B"),
+                    switchNightMode = false, notify = false)
+                ThemeConfig.applyTheme(host)
+            }
+            capture("02-custom-accent")
+            apply(localLibrary.create()); capture("03-local-package")
+            apply(night); capture("04-night")
+            apply(day); capture("05-derived-dark-day-text", darkBase = true)
+        } finally {
+            failures.attempt("close player theme host") { scenario?.close() }
+            failures.attempt("restore player theme library") { library?.restore(failures) }
+            failures.attempt("restore player theme runtime") { snapshot?.restore(context, failures) }
+        }
+        failures.throwIfAny()
+    }
+
+    private fun copyPlayerView(window: Window, view: View): Bitmap {
+        val wasDrawingEnabled = HardwareRendererCompat.isDrawingEnabled()
+        if (!wasDrawingEnabled) HardwareRendererCompat.setDrawingEnabled(true)
+        try {
+        val drawn = CountDownLatch(1)
+        val listener = ViewTreeObserver.OnDrawListener { drawn.countDown() }
+        onThemeMain { view.viewTreeObserver.addOnDrawListener(listener); view.invalidate() }
+        try { check(drawn.await(10, TimeUnit.SECONDS)) { "Player probe did not draw" } }
+        finally { onThemeMain { view.viewTreeObserver.removeOnDrawListener(listener) } }
+        lateinit var rect: Rect
+        onThemeMain {
+            val origin = IntArray(2); view.getLocationInWindow(origin)
+            rect = Rect(origin[0], origin[1], origin[0] + view.width, origin[1] + view.height)
+        }
+        check(!rect.isEmpty)
+        val bitmap = Bitmap.createBitmap(rect.width(), rect.height(), Bitmap.Config.ARGB_8888)
+        val complete = CountDownLatch(1)
+        val result = AtomicInteger(PixelCopy.ERROR_UNKNOWN)
+        onThemeMain {
+            PixelCopy.request(window, rect, bitmap, { code -> result.set(code); complete.countDown() },
+                Handler(Looper.getMainLooper()))
+        }
+        check(complete.await(10, TimeUnit.SECONDS) && result.get() == PixelCopy.SUCCESS) {
+            "Player probe PixelCopy failed"
+        }
+        return bitmap
+        } finally {
+            if (!wasDrawingEnabled) HardwareRendererCompat.setDrawingEnabled(false)
+        }
     }
 }
 
