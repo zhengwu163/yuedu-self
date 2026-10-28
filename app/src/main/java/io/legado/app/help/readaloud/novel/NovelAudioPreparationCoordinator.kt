@@ -191,6 +191,19 @@ object NovelAudioPreparationCoordinator {
 
                 NovelAudioLocalFirstPolicy.Decision.PREPARE_REMOTE -> Unit
             }
+            // 整本生成的章节从电脑导入，不再逐章分析合成；电脑整本任务期间也会拒绝逐章请求。
+            when (NovelAudioBookJobSync.playbackSource(currentRequest.bookUrl, currentRequest.chapterIndex)) {
+                NovelAudioBookJobSync.PlaybackSource.IMPORTED ->
+                    return@runBlock PreparationResult.Local(entry.generation)
+
+                NovelAudioBookJobSync.PlaybackSource.NOT_READY ->
+                    return@runBlock PreparationResult.Failed(
+                        reason = NovelAudioBookJobSync.NOT_READY_MESSAGE,
+                        generation = entry.generation
+                    )
+
+                NovelAudioBookJobSync.PlaybackSource.NOT_BOOK_JOB -> Unit
+            }
             // 当前章与后续章共用同一套凭据、预算、分析与下载装配。
             val environment = NovelAudioPreparationEnvironment.open()
                 ?: return@runBlock PreparationResult.Failed(

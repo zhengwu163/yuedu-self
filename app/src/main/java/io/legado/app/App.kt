@@ -218,6 +218,8 @@ class App : Application() {
             AutoTask.refreshSchedule()
             // AI 听书：恢复用户此前明确要求的固定下载（仅 PINNED，离线不启动）
             io.legado.app.help.readaloud.novel.NovelAudioPinnedRecoveryStarter.start()
+            // AI 听书整本生成：续传未传完的正文、导入电脑已完成的章节（仅家里 Wi‑Fi）
+            io.legado.app.help.readaloud.novel.NovelAudioBookJobSync.onAppStart(this@App)
             // F-暗夜紫可回切：把内置暗夜紫主题注册进「主题包」体系，使其在主题列表(夜间)可见可选，避免切走后回不去
             // theme-fontscale-daynight AD-03：改读代码内置配置（历史 themeConfig.json 资产已移除）
             runCatching {

@@ -701,6 +701,10 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <service
+            android:name=".service.NovelAudioBookJobSyncService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <service
             android:name=".service.TtsPrebuildService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />

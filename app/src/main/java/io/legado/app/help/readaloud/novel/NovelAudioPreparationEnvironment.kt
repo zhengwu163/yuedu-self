@@ -156,7 +156,7 @@ internal class NovelAudioPreparationEnvironment private constructor(
     }
 
     companion object {
-        private const val AUDIO_DIRECTORY = "novel-audio"
+        internal const val AUDIO_DIRECTORY = "novel-audio"
         private val runtimeBatchLane = NovelAudioRuntimeBatchLane()
 
         /** 未配置服务器凭据时返回 null；调用方据此报 MISSING_CREDENTIALS。 */

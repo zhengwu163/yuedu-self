@@ -130,8 +130,13 @@ class NovelAudioBookJobService : Service() {
         private const val WIFI_RETRY_MILLIS = 60_000L
         private const val MAX_WIFI_WAITS = 30
 
-        fun start(context: Context) {
+        /** 后台被拉起时系统可能拒绝启动前台服务；这时等下次打开 App 再续传。 */
+        fun start(context: Context): Boolean = try {
             ContextCompat.startForegroundService(context, Intent(context, NovelAudioBookJobService::class.java))
+            true
+        } catch (error: IllegalStateException) {
+            AppLog.put("整本生成上传暂未启动：${error.javaClass.simpleName}")
+            false
         }
     }
 }
