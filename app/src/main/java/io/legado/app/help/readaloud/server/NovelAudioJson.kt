@@ -68,6 +68,83 @@ internal object NovelAudioJson {
         ChapterAnalysisResponse(assignments, created, aliases)
     }
 
+    fun bookJobCreated(json: String): BookJobCreated = decode(json) { root ->
+        BookJobCreated(
+            root.text("jobId").also(::requireJobId),
+            root.int("maxSegmentChars", 1..MAX_SEGMENT_CHARS),
+            root.text("state").also { require(it in BookJobStates.ALL) }
+        )
+    }
+
+    fun bookJobState(json: String): String = decode(json) { root -> root.text("state") }
+
+    fun bookJobDetail(json: String): BookJobDetail = decode(json) { root ->
+        BookJobDetail(
+            jobId = root.text("jobId").also(::requireJobId),
+            state = root.text("state").also { require(it in BookJobStates.ALL) },
+            uploaded = root.bool("uploaded"),
+            expectedChapterCount = root.int("expectedChapterCount", 1..10_000),
+            recentChapterSeconds = root.optionalNumber("recentChapterSeconds"),
+            chapters = root.objects("chapters").map {
+                BookJobChapterState(
+                    chapterId = it.text("chapterId"),
+                    chapterIndex = it.int("chapterIndex", 0..100_000),
+                    snapshotHash = it.text("snapshotHash"),
+                    state = it.text("state").also { state -> require(state in BookJobChapterStates.ALL) },
+                    failure = it.nullableText("failure"),
+                    downloaded = it.bool("downloaded")
+                )
+            }.also { chapters -> require(chapters.map { it.chapterId }.distinct().size == chapters.size) }
+        )
+    }
+
+    fun bookJobChapterResult(json: String): BookJobChapterResult = decode(json) { root ->
+        val units = root.objects("units").map { unit ->
+            BookJobResultUnit(
+                unitId = unit.text("unitId"),
+                speakerId = unit.text("speakerId").toLong().also { require(it >= 0L) },
+                pieces = unit.objects("pieces").map {
+                    BookJobPiece(
+                        index = it.int("index", 0..MAX_PIECES_PER_UNIT),
+                        textSha256 = it.text("textSha256").also(::requireSha256),
+                        audioId = it.text("audioId").also { id -> require(AUDIO_ID.matches(id)) },
+                        sha256 = it.text("sha256").also(::requireSha256),
+                        size = it.int("size", 1..AUDIO_LIMIT).toLong(),
+                        contentType = it.text("contentType"),
+                        ttsProfile = it.text("ttsProfile")
+                    )
+                }.also { pieces -> require(pieces.map { it.index } == pieces.indices.toList()) }
+            )
+        }
+        require(units.map { it.unitId }.distinct().size == units.size)
+        BookJobChapterResult(
+            chapterId = root.text("chapterId"),
+            chapterIndex = root.int("chapterIndex", 0..100_000),
+            snapshotHash = root.text("snapshotHash"),
+            units = units,
+            characters = root.objects("characters").map {
+                BookJobResultCharacter(
+                    characterId = it.text("characterId").toLong().also { id -> require(id > 0L) },
+                    displayName = it.text("displayName"),
+                    gender = it.nullableText("gender").orEmpty(),
+                    phoneKnown = it.bool("phoneKnown"),
+                    stableAliases = it.strings("stableAliases")
+                )
+            },
+            bindings = root.objects("bindings").map {
+                BookJobBinding(
+                    characterId = it.text("characterId").also { id -> require(id.toLong() >= 0L) },
+                    voiceAssetId = it.text("voiceAssetId"),
+                    revision = it.int("revision", 0..Int.MAX_VALUE).toLong()
+                )
+            }
+        )
+    }
+
+    private fun requireJobId(value: String) = require(JOB_ID.matches(value))
+
+    private fun requireSha256(value: String) = require(SHA256.matches(value))
+
     private fun <T> decode(json: String, transform: (JsonObject) -> T): T =
         kotlin.runCatching {
             rejectDuplicateKeys(json)
@@ -136,6 +213,24 @@ internal object NovelAudioJson {
         return number.intValueExact().also { require(it in range) }
     }
 
+    private fun JsonObject.int(key: String, range: IntRange): Int =
+        requireNotNull(optionalInt(key, range))
+
+    /** 缺省或 JSON null 返回 null；出现时必须是字符串（可为空串）。 */
+    private fun JsonObject.nullableText(key: String): String? {
+        val value = get(key)
+        if (value == null || value.isJsonNull) return null
+        require(value.isJsonPrimitive && value.asJsonPrimitive.isString)
+        return value.asString
+    }
+
+    private fun JsonObject.optionalNumber(key: String): Double? {
+        val value = get(key)
+        if (value == null || value.isJsonNull) return null
+        require(value.isJsonPrimitive && value.asJsonPrimitive.isNumber)
+        return value.asDouble.also { require(it.isFinite() && it >= 0.0) }
+    }
+
     private fun JsonObject.objects(key: String): List<JsonObject> {
         val value = get(key)
         require(value != null && value.isJsonArray)
@@ -153,6 +248,11 @@ internal object NovelAudioJson {
 
     // 与合成请求的单次文本上限一致。
     private const val MAX_SEGMENT_CHARS = 1200
+    private const val MAX_PIECES_PER_UNIT = 256
+    private const val AUDIO_LIMIT = 16 * 1024 * 1024
+    private val JOB_ID = Regex("job-[0-9a-f]{24}")
+    private val AUDIO_ID = Regex("[0-9a-f]{32}")
+    private val SHA256 = Regex("[0-9a-f]{64}")
 
     private val RUNTIME_STATES = setOf(
         "idle",

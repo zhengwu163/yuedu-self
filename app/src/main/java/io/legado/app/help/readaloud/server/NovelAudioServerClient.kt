@@ -48,6 +48,10 @@ class NovelAudioServerException(val kind: String) : NoStackTraceException(
         "UNAVAILABLE" -> "家庭 AI 服务不可用，可重试或切回普通朗读"
         "PROTOCOL" -> "家庭 AI 服务响应不符合 v1 协议"
         "STORAGE" -> "无法读取或保存 AI 音频服务配置，请重新配置后再试"
+        "BOOK_JOB_RUNNING" -> "电脑正在整本生成，暂时不能逐章生成"
+        "NOT_READY" -> "这一章电脑还在生成"
+        "JOB_CLOSED" -> "整本生成任务已结束"
+        "UNKNOWN_JOB" -> "电脑上找不到这个整本生成任务"
         else -> "家庭 AI 服务请求失败"
     }
 )
@@ -192,6 +196,91 @@ class NovelAudioServerClient(
             selfHostedLeases.remove(leaseId)
         }
         Unit
+    }
+
+    // 整本生成：电脑自己持有模型，手机只上传正文与下载音频，不占租约、不计云端额度。
+
+    suspend fun createBookJob(request: BookJobCreateRequest): BookJobCreated =
+        withContext(Dispatchers.IO) {
+            checkConfig(request.bookId.isNotBlank() && request.title.isNotBlank() &&
+                request.expectedChapterCount in 1..10_000)
+            NovelAudioJson.bookJobCreated(
+                json("book-jobs", encodePayload(request), BOOK_JOB_TIMEOUT_MILLIS, null, "POST"))
+        }
+
+    /** 返回 false 表示电脑已有同一快照，本次上传没有改动。 */
+    suspend fun uploadBookJobChapter(
+        jobId: String,
+        chapterId: String,
+        chapter: BookJobChapterUpload
+    ): Boolean = withContext(Dispatchers.IO) {
+        checkConfig(chapter.units.isNotEmpty())
+        when (NovelAudioJson.bookJobState(json(bookJobPath(jobId, "chapters", chapterId),
+            encodePayload(chapter), BOOK_JOB_TIMEOUT_MILLIS, null, "PUT"))) {
+            "stored" -> true
+            "unchanged" -> false
+            else -> throw NovelAudioServerException("PROTOCOL")
+        }
+    }
+
+    suspend fun markBookJobUploaded(jobId: String): String = bookJobControl(jobId, "uploaded")
+
+    /** action 为 pause、resume 或 cancel；返回电脑端任务的新状态。 */
+    suspend fun controlBookJob(jobId: String, action: String): String {
+        checkConfig(action in setOf("pause", "resume", "cancel"))
+        return bookJobControl(jobId, action)
+    }
+
+    private suspend fun bookJobControl(jobId: String, action: String): String =
+        withContext(Dispatchers.IO) {
+            NovelAudioJson.bookJobState(json(bookJobPath(jobId, action), ByteArray(0),
+                BOOK_JOB_TIMEOUT_MILLIS, null, "POST"))
+                .also { if (it !in BookJobStates.ALL) throw NovelAudioServerException("PROTOCOL") }
+        }
+
+    suspend fun bookJob(jobId: String): BookJobDetail = withContext(Dispatchers.IO) {
+        NovelAudioJson.bookJobDetail(json(bookJobPath(jobId), null, BOOK_JOB_TIMEOUT_MILLIS, null, "GET"))
+            .also { if (it.jobId != jobId) throw NovelAudioServerException("PROTOCOL") }
+    }
+
+    suspend fun bookJobChapter(jobId: String, chapterId: String): BookJobChapterResult =
+        withContext(Dispatchers.IO) {
+            NovelAudioJson.bookJobChapterResult(json(bookJobPath(jobId, "chapters", chapterId),
+                null, BOOK_JOB_TIMEOUT_MILLIS, null, "GET"))
+                .also { if (it.chapterId != chapterId) throw NovelAudioServerException("PROTOCOL") }
+        }
+
+    suspend fun bookJobAudio(jobId: String, audioId: String): SynthesizedAudio =
+        withContext(Dispatchers.IO) {
+            checkConfig(BOOK_JOB_AUDIO_ID.matches(audioId))
+            val result = exchange(bookJobPath(jobId, "audio", audioId), null,
+                BOOK_JOB_TIMEOUT_MILLIS, true, null, "GET")
+            SynthesizedAudio(result.bytes, result.type, result.profile)
+        }
+
+    suspend fun markBookJobChapterDownloaded(jobId: String, chapterId: String) =
+        withContext(Dispatchers.IO) {
+            json(bookJobPath(jobId, "chapters", chapterId, "downloaded"), ByteArray(0),
+                BOOK_JOB_TIMEOUT_MILLIS, null, "POST")
+            Unit
+        }
+
+    suspend fun updateBookJobVoiceBindings(jobId: String, bindings: List<BookJobBinding>) =
+        withContext(Dispatchers.IO) {
+            json(bookJobPath(jobId, "voice-bindings"), encodePayload(BookJobBindingsUpdate(bindings)),
+                BOOK_JOB_TIMEOUT_MILLIS, null, "PUT")
+            Unit
+        }
+
+    suspend fun deleteBookJob(jobId: String) = withContext(Dispatchers.IO) {
+        json(bookJobPath(jobId), null, BOOK_JOB_TIMEOUT_MILLIS, null, "DELETE")
+        Unit
+    }
+
+    /** 路径段只允许电脑端生成的任务 ID 与手机生成的散列 ID，不做 URL 编码。 */
+    private fun bookJobPath(jobId: String, vararg rest: String): String {
+        checkConfig(BOOK_JOB_ID.matches(jobId) && rest.all { BOOK_JOB_SEGMENT.matches(it) })
+        return (listOf("book-jobs", jobId) + rest).joinToString("/")
     }
 
     /**
@@ -435,6 +524,11 @@ class NovelAudioServerClient(
          * 留出余量避免把正在生成的请求判超时后重发。
          */
         internal const val TTS_TIMEOUT_MILLIS = 60_000L
+        /** 整本任务接口只读写电脑上的数据库与文件，不等模型。 */
+        internal const val BOOK_JOB_TIMEOUT_MILLIS = 30_000L
+        private val BOOK_JOB_ID = Regex("job-[0-9a-f]{24}")
+        private val BOOK_JOB_AUDIO_ID = Regex("[0-9a-f]{32}")
+        private val BOOK_JOB_SEGMENT = Regex("[A-Za-z0-9_-]{1,128}")
         private const val JSON_LIMIT = 2 * 1024 * 1024
         private const val AUDIO_LIMIT = 16 * 1024 * 1024
         private const val ERROR_BODY_LIMIT = 4096L
@@ -472,6 +566,10 @@ class NovelAudioServerClient(
                             bridgeCode == "free_quota_only" -> "FREE_QUOTA_EXHAUSTED"
                             bridgeCode == "local_trial_limit" -> "LOCAL_BUDGET_EXHAUSTED"
                             bridgeCode == "busy" -> "CONCURRENCY_LIMIT"
+                            bridgeCode == "book_job_running" -> "BOOK_JOB_RUNNING"
+                            bridgeCode == "chapter_not_ready" -> "NOT_READY"
+                            bridgeCode == "job_closed" -> "JOB_CLOSED"
+                            bridgeCode == "unknown_job" -> "UNKNOWN_JOB"
                             bridgeCode == "insufficient_resources" ||
                                 bridgeCode == "resource_check_failed" -> "INSUFFICIENT_RESOURCES"
                             bridgeCode == "invalid_lease" || bridgeCode == "lease_expired" ||
