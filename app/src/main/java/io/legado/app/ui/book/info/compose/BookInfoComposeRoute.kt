@@ -210,6 +210,8 @@ data class BookInfoActions(
     val onCopyBookUrl: () -> Unit = {},
     val onCopyTocUrl: () -> Unit = {},
     val onClearCache: () -> Unit = {},
+    /** 整本生成；菜单只在书已加入书架时显示。 */
+    val onBookJob: (() -> Unit)? = null,
     val onSetupWebIntro: (WebView) -> Unit = {},
     val onRefreshEnabledChanged: (Boolean) -> Unit = {},
     val onQuickActionsChanged: () -> Unit = {}
@@ -1149,6 +1151,12 @@ private fun BookInfoMoreActionSheet(
                 BookInfoMoreActionItem(stringResource(R.string.set_book_variable), style) {
                     onDismiss()
                     actions.onSetBookVariable()
+                }
+                actions.onBookJob?.takeIf { state.inBookshelf }?.let { onBookJob ->
+                    BookInfoMoreActionItem(stringResource(R.string.novel_audio_book_job_title), style) {
+                        onDismiss()
+                        onBookJob()
+                    }
                 }
                 BookInfoMoreActionItem(
                     text = stringResource(R.string.clear_cache),

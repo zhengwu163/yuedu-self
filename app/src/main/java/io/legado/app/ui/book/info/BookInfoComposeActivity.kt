@@ -392,6 +392,7 @@ class BookInfoComposeActivity :
             onCopyBookUrl = ::copyBookUrl,
             onCopyTocUrl = ::copyTocUrl,
             onClearCache = ::clearBookCache,
+            onBookJob = { NovelAudioBookJobEntry.open(this, viewModel.getBook(false)) },
             onSetupWebIntro = ::setupWebIntro,
             onRefreshEnabledChanged = { enabled ->
                 if (::refreshLayout.isInitialized) {

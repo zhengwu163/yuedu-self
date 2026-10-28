@@ -45,12 +45,10 @@ object NovelAudioBookJobSync {
         }.onError { AppLog.put("整本生成同步失败", it) }
     }
 
-    /** 打开书籍详情时调用：只同步这本书。 */
-    fun syncBookSoon(book: Book) {
-        Coroutine.async(executeContext = Dispatchers.IO) {
-            val job = NovelAudioBookJobs.activeJob(book) ?: return@async
-            if (NovelAudioBookJobs.onHomeNetwork()) syncJob(job.jobId)
-        }.onError { AppLog.put("整本生成同步失败", it) }
+    /** 打开整本生成进度时调用：只同步这本书。 */
+    suspend fun syncBookNow(book: Book) {
+        val job = NovelAudioBookJobs.activeJob(book) ?: return
+        if (NovelAudioBookJobs.onHomeNetwork()) syncJob(job.jobId)
     }
 
     enum class PlaybackSource { NOT_BOOK_JOB, IMPORTED, NOT_READY }

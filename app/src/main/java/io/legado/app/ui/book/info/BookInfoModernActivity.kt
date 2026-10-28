@@ -1017,6 +1017,12 @@ class BookInfoModernActivity :
             add(MenuAction(title = getString(R.string.share), onClick = ::shareBook))
             add(MenuAction(title = getString(R.string.upload_to_remote), onClick = ::uploadBookToRemote))
             add(MenuAction(title = getString(R.string.to_top), onClick = { viewModel.topBook() }))
+            if (viewModel.inBookshelf) {
+                add(MenuAction(
+                    title = getString(R.string.novel_audio_book_job_title),
+                    onClick = { NovelAudioBookJobEntry.open(this@BookInfoModernActivity, book) }
+                ))
+            }
             if (book?.isLocalTxt == true) {
                 add(
                     MenuAction(

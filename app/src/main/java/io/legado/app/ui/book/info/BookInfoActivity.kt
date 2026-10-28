@@ -486,6 +486,13 @@ class BookInfoActivity :
             title = getString(R.string.to_top),
             onClick = { viewModel.topBook() }
         )
+        if (viewModel.inBookshelf) {
+            actions += MenuAction(
+                icon = Icons.Filled.CloudUpload,
+                title = getString(R.string.novel_audio_book_job_title),
+                onClick = { NovelAudioBookJobEntry.open(this, viewModel.getBook(false)) }
+            )
+        }
         if (source != null) {
             actions += MenuAction(
                 icon = Icons.Filled.Code,
