@@ -91,6 +91,13 @@ object NovelAudioBookJobSync {
         val client = NovelAudioBookJobs.client() ?: return NovelAudioBookJobImporter.Summary()
         val job = appDb.novelAudioBookJobDao.job(jobId) ?: return NovelAudioBookJobImporter.Summary()
         val book = appDb.bookDao.getBook(job.physicalBookUrl) ?: return NovelAudioBookJobImporter.Summary()
+        if (onlyChapter == null && job.state != NovelAudioBookJobStates.DONE) {
+            // 手机上手动改过的音色同步给电脑，只影响电脑之后处理的章节；已下载的章节不变。
+            kotlin.runCatching {
+                client.updateBookJobVoiceBindings(jobId, NovelAudioBookJobCreator.phoneBindings(
+                    NovelAudioRoomCharacterStore(appDb), job.workKey, job.serverScope, job.createdAt))
+            }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        }
         importer(client, book).sync(jobId, onlyChapter, canContinue)
     }
 

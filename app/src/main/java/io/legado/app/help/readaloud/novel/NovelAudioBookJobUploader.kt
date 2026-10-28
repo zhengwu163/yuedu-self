@@ -60,9 +60,7 @@ class NovelAudioBookJobCreator(
             merges = characterStore.activeMerges(workKey).map {
                 BookJobMerge(it.absorbedCharacterId.toString(), it.primaryCharacterId.toString())
             },
-            bindings = characterStore.voiceBindings(ids + 0L)
-                .filter { it.scope == serverScope && (it.characterId == 0L || it.characterId in ids) }
-                .map { BookJobBinding(it.characterId.toString(), it.voiceAssetId, it.revision) }
+            bindings = phoneBindings(characterStore, workKey, serverScope, createdUpTo = null)
         ))
         val now = clock()
         val job = NovelAudioBookJobEntity(
@@ -90,9 +88,27 @@ class NovelAudioBookJobCreator(
         return job
     }
 
-    private companion object {
-        const val MAX_CHAPTERS = 10_000
-        const val MAX_TITLE = 256
+    companion object {
+        private const val MAX_CHAPTERS = 10_000
+        private const val MAX_TITLE = 256
+
+        /**
+         * 手机上的旁白与人物音色绑定。createdUpTo 不为空时只取建任务前已有的人物：
+         * 这些人物在电脑上 ID 相同，手动改音色后可以直接同步；电脑新建的人物 ID 可能不同，不同步。
+         */
+        fun phoneBindings(
+            store: NovelAudioCharacterStore,
+            workKey: String,
+            serverScope: String,
+            createdUpTo: Long?
+        ): List<BookJobBinding> {
+            val ids = store.characters(workKey)
+                .filter { createdUpTo == null || it.createdAt <= createdUpTo }
+                .map { it.id }.toSet()
+            return store.voiceBindings(ids + 0L)
+                .filter { it.scope == serverScope && (it.characterId == 0L || it.characterId in ids) }
+                .map { BookJobBinding(it.characterId.toString(), it.voiceAssetId, it.revision) }
+        }
     }
 }
 

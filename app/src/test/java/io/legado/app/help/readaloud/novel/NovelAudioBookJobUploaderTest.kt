@@ -46,6 +46,18 @@ class NovelAudioBookJobUploaderTest {
         assertEquals(listOf("c1", "c2", "c0"), dao.chapters(JOB).map { it.chapterId })
     }
 
+    @Test fun bindingSyncSkipsCharactersCreatedAfterTheJob() {
+        store.seed(WORK, listOf(
+            BookCharacter(id = 7, bookUrl = WORK, name = "单牧", createdAt = 10L),
+            BookCharacter(id = 9, bookUrl = WORK, name = "曾晚", createdAt = 99L)))
+        store.seedBinding(NovelAudioVoiceBindingEntity(scope = SCOPE, characterId = 0, voiceAssetId = "N2", revision = 3))
+        store.seedBinding(NovelAudioVoiceBindingEntity(scope = SCOPE, characterId = 7, voiceAssetId = "M2", revision = 2))
+        store.seedBinding(NovelAudioVoiceBindingEntity(scope = SCOPE, characterId = 9, voiceAssetId = "F1", revision = 1))
+        val bindings = NovelAudioBookJobCreator.phoneBindings(store, WORK, SCOPE, createdUpTo = 50L)
+        assertEquals(setOf("0" to "N2", "7" to "M2"), bindings.map { it.characterId to it.voiceAssetId }.toSet())
+        assertEquals(3, NovelAudioBookJobCreator.phoneBindings(store, WORK, SCOPE, createdUpTo = null).size)
+    }
+
     @Test fun uploadsInOrderSkipsMissingTextAndFinishes() = runBlocking {
         createJob(chapterCount = 3, current = 1)
         val uploads = mutableListOf<Pair<String, BookJobChapterUpload>>()
