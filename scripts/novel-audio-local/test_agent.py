@@ -24,6 +24,21 @@ class LocalAgentStartupTest(unittest.TestCase):
             self.assertTrue((root / "state/agent.pid").exists())
             agent.close()
 
+    def test_book_jobs_are_wired_under_state_and_routed_after_auth(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            agent = LocalAgent(self.write_config(root, self.registry()), fake=True)
+            try:
+                self.assertTrue((root / "state/book-jobs.sqlite3").is_file())
+                self.assertEqual(30, agent.api.book_jobs.runner.retention_days)
+                status, _, body = agent.api.respond(
+                    "GET", "/v1/book-jobs", "Bearer " + agent.token, None, None)
+                self.assertEqual((200, {"jobs": []}), (status, body))
+                status, _, _ = agent.api.respond("GET", "/v1/book-jobs", "Bearer x", None, None)
+                self.assertEqual(401, status)
+            finally:
+                agent.close()
+
     def wait_until(self, predicate, timeout=3):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:

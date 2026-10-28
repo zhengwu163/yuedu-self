@@ -3,12 +3,17 @@
 import json
 import os
 import threading
+import time
 from pathlib import Path
 
 from scripts.novel_audio_server.api import NovelAudioApi
 from scripts.novel_audio_server.http import create_server
 from scripts.novel_audio_server.runtime import RuntimeManager
 
+from book_jobs_api import BookJobsApi
+from book_jobs_pronunciation import PronunciationDictionary
+from book_jobs_runner import BookJobRunner
+from book_jobs_store import BookJobStore
 from config import ensure_token, load_config
 from model_registry import sha256_file
 from state_lock import StateLock
@@ -120,12 +125,29 @@ class LocalAgent:
             catalog=self.catalog,
             runtime=self.runtime,
         )
+        self.api.book_jobs = self._create_book_jobs()
         self.http = create_server(
             self.config.host,
             self.config.port,
             self.api,
             allow_lan=self.config.allow_lan,
         )
+
+    def _create_book_jobs(self):
+        # Whole-book jobs persist under state/ so they resume after a restart.
+        store = BookJobStore(
+            self.state_dir / "book-jobs.sqlite3", self.state_dir / "book-jobs"
+        )
+        dictionary = self.config.root / "config" / "pronunciation.json"
+        runner = BookJobRunner(
+            store,
+            self.runtime,
+            self.catalog,
+            capabilities=self.api._active_capabilities,
+            pronunciation=lambda: PronunciationDictionary.load(dictionary),
+            retention_days=self.config.book_job_retention_days,
+        )
+        return BookJobsApi(store, runner, self.api._max_segment_chars(), time.time)
 
     def close(self):
         if self._closed:
@@ -220,6 +242,7 @@ class LocalAgent:
                 daemon=True,
             )
             watcher.start()
+            self.api.book_jobs.runner.start()
             self.http.serve_forever()
         finally:
             self._stop_watch_stop.set()

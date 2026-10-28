@@ -97,6 +97,30 @@ class CheckReportTest(unittest.TestCase):
                 with self.assertRaises(ConfigError):
                     load_config(path)
 
+    def test_book_job_retention_defaults_to_thirty_days_and_is_bounded(self):
+        example = json.loads((ROOT / "local-model.example.json").read_text(encoding="utf-8"))
+        for book_jobs, expected in (
+            (None, 30),
+            ({"retentionDaysAfterDownload": 7}, 7),
+            ({"retentionDaysAfterDownload": 0}, ConfigError),
+            ({"retentionDaysAfterDownload": 366}, ConfigError),
+            ({"retentionDaysAfterDownload": 7.5}, ConfigError),
+            ({"retentionDaysAfterDownload": True}, ConfigError),
+            ({"keepForever": True}, ConfigError),
+            ([], ConfigError),
+        ):
+            with self.subTest(book_jobs=book_jobs), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "local-model.json"
+                config_value = dict(example)
+                if book_jobs is not None:
+                    config_value["bookJobs"] = book_jobs
+                path.write_text(json.dumps(config_value), encoding="utf-8")
+                if expected is ConfigError:
+                    with self.assertRaises(ConfigError):
+                        load_config(path)
+                else:
+                    self.assertEqual(expected, load_config(path).book_job_retention_days)
+
     def test_blocked_runtime_json_and_exit_code_remain_consistent(self):
         from runtime_probe import ProbeOutput
         from test_runtime_probe import GoodRunner

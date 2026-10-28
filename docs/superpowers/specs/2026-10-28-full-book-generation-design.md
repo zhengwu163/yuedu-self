@@ -127,6 +127,10 @@
 一致性测试：从现有 Kotlin 单测中整理一组输入输出用例（JSON），Python 端跑同一组用例，结果必须完全相同；
 以后改任一侧逻辑都要同时更新这组用例。手机导入时人物表仍由 Kotlin 代码最终写入，电脑只提出建议。
 
+当前状态：用例在 `scripts/novel-audio-local/fixtures/book_jobs_parity.json`，Python 端由
+`test_book_jobs_analysis.py` 读取并全部通过；Kotlin 端读取同一文件的 JVM 测试随第 2 步手机端一起补上，
+在那之前用例的期望值是按 Kotlin 源码推出来的，尚未由 Kotlin 实际跑过。
+
 ## 7. 读音词典
 
 放在电脑端，合成前替换文字；对所有引擎、整本任务和逐章模式都生效。手机上的正文、高亮和正文位置不受影响，
@@ -140,6 +144,8 @@
   手机端编辑界面放到第二版，需要过主题一致性卡点。
 - 可选辅助：分析时对含多音字姓氏的人名（曾、单、解、仇、朴、区、查、尉迟等）给出提示清单，由用户确认后写入词典。
 - 基准文本 `scripts/novel-audio-bench/fixtures/`（分支 `chore/bench-fixtures`）已包含这些检查点，可直接用来验收。
+- 当前只接到整本任务的合成上；逐章模式（`api.py` 的 `/v1/tts/synthesize`）暂不替换，
+  等 Windows agent 的批量合成改动合入后再接，避免同时改同一段代码。
 
 ## 8. 与 Windows agent 当前任务的关系
 

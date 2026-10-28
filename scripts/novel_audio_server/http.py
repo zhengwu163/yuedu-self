@@ -46,6 +46,12 @@ def create_server(host, port, api, allow_lan=False):
         def do_POST(self):
             self.handle_api()
 
+        def do_PUT(self):
+            self.handle_api()
+
+        def do_DELETE(self):
+            self.handle_api()
+
         def handle_api(self):
             self.request_context = RequestContext()
             self.monitor_stop = threading.Event()
@@ -116,7 +122,7 @@ def create_server(host, port, api, allow_lan=False):
                 and size == 0
             )
             if (
-                self.command == "POST"
+                self.command in ("POST", "PUT")
                 and not bodyless_release
                 and self.headers.get_content_type() != "application/json"
             ):

@@ -102,6 +102,8 @@ class LocalModelConfig:
     minimum_vram_gb: float = 24.0
     worker_startup_timeout: float = DEFAULT_WORKER_STARTUP_TIMEOUT
     worker_ipc_timeout: float = DEFAULT_WORKER_IPC_TIMEOUT
+    # Days a whole-book chapter's audio stays on the host after the phone downloaded it.
+    book_job_retention_days: int = 30
 
     @property
     def profile(self):
@@ -167,6 +169,7 @@ def load_config(path):
         "modelRegistry",
         "activeProfile",
         "minimumVramGb",
+        "bookJobs",
     }
     if set(data) - allowed:
         raise ConfigError("unknown config field")
@@ -192,6 +195,12 @@ def load_config(path):
         or not 24.0 <= float(minimum_vram_gb) <= 256.0
     ):
         raise ConfigError("invalid minimumVramGb")
+    book_jobs = data.get("bookJobs", {})
+    if not isinstance(book_jobs, dict) or set(book_jobs) - {"retentionDaysAfterDownload"}:
+        raise ConfigError("invalid bookJobs")
+    retention_days = book_jobs.get("retentionDaysAfterDownload", 30)
+    if type(retention_days) is not int or not 1 <= retention_days <= 365:
+        raise ConfigError("invalid bookJobs.retentionDaysAfterDownload")
     worker_startup_timeout = data.get(
         "workerStartupTimeout", DEFAULT_WORKER_STARTUP_TIMEOUT
     )
@@ -319,6 +328,7 @@ def load_config(path):
         minimum_vram_gb=float(minimum_vram_gb),
         worker_startup_timeout=float(worker_startup_timeout),
         worker_ipc_timeout=float(worker_ipc_timeout),
+        book_job_retention_days=retention_days,
     )
 
 

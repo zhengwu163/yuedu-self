@@ -1,0 +1,201 @@
+{
+  "comment": "Shared parity cases for the phone (Kotlin) and host (Python) implementations of chapter analysis rules. Expected values follow the Kotlin source of truth; change both sides and this file together.",
+  "normalizeAlias": [
+    {"input": " 林 舟 ", "output": "林舟"},
+    {"input": "ＬＩＮ", "output": "lin"},
+    {"input": "\u3000林舟", "output": "林舟"},
+    {"input": "林\u00a0舟", "output": "林舟"},
+    {"input": "他", "error": true},
+    {"input": "老师", "error": true},
+    {"input": "   ", "error": true}
+  ],
+  "explicitSpeaker": [
+    {
+      "name": "reporting clause before dialogue",
+      "units": [
+        {"unitId": "n0", "text": "林舟抬头看了看她，说：", "roleType": "narrator"},
+        {"unitId": "d1", "text": "“你来了。”", "roleType": "dialogue"}
+      ],
+      "index": 1,
+      "characters": [{"id": 1, "name": "林舟"}, {"id": 2, "name": "苏禾"}],
+      "aliases": [],
+      "expected": 1
+    },
+    {
+      "name": "two names before dialogue stay ambiguous",
+      "units": [
+        {"unitId": "n0", "text": "林舟对苏禾说：", "roleType": "narrator"},
+        {"unitId": "d1", "text": "“走吧。”", "roleType": "dialogue"}
+      ],
+      "index": 1,
+      "characters": [{"id": 1, "name": "林舟"}, {"id": 2, "name": "苏禾"}],
+      "aliases": [],
+      "expected": null
+    },
+    {
+      "name": "reporting clause after dialogue",
+      "units": [
+        {"unitId": "d0", "text": "“走吧。”", "roleType": "dialogue"},
+        {"unitId": "n1", "text": "苏禾笑着说道。", "roleType": "narrator"}
+      ],
+      "index": 0,
+      "characters": [{"id": 1, "name": "林舟"}, {"id": 2, "name": "苏禾"}],
+      "aliases": [],
+      "expected": 2
+    },
+    {
+      "name": "narrator unit maps to narrator",
+      "units": [{"unitId": "n0", "text": "天黑了。", "roleType": "narrator"}],
+      "index": 0,
+      "characters": [{"id": 1, "name": "林舟"}],
+      "aliases": [],
+      "expected": 0
+    },
+    {
+      "name": "stored alias counts as a name",
+      "units": [
+        {"unitId": "n0", "text": "小林说：", "roleType": "narrator"},
+        {"unitId": "d1", "text": "“好。”", "roleType": "dialogue"}
+      ],
+      "index": 1,
+      "characters": [{"id": 1, "name": "林舟"}],
+      "aliases": [{"characterId": 1, "alias": "小林"}],
+      "expected": 1
+    },
+    {
+      "name": "no reporting verb",
+      "units": [
+        {"unitId": "n0", "text": "林舟转过身，", "roleType": "narrator"},
+        {"unitId": "d1", "text": "“好。”", "roleType": "dialogue"}
+      ],
+      "index": 1,
+      "characters": [{"id": 1, "name": "林舟"}],
+      "aliases": [],
+      "expected": null
+    },
+    {
+      "name": "modifier longer than twelve characters",
+      "units": [
+        {"unitId": "n0", "text": "林舟一边收拾桌上的旧报纸一边小声说：", "roleType": "narrator"},
+        {"unitId": "d1", "text": "“好。”", "roleType": "dialogue"}
+      ],
+      "index": 1,
+      "characters": [{"id": 1, "name": "林舟"}],
+      "aliases": [],
+      "expected": null
+    },
+    {
+      "name": "blank unit between clause and dialogue is skipped",
+      "units": [
+        {"unitId": "n0", "text": "林舟说：", "roleType": "narrator"},
+        {"unitId": "b1", "text": "  ", "roleType": "narrator"},
+        {"unitId": "d2", "text": "“好。”", "roleType": "dialogue"}
+      ],
+      "index": 2,
+      "characters": [{"id": 1, "name": "林舟"}],
+      "aliases": [],
+      "expected": 1
+    }
+  ],
+  "resolve": [
+    {
+      "name": "new character gets next id",
+      "existing": [{"id": 1, "name": "林舟", "gender": "male"}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [{"temporaryId": "t1", "displayName": "苏禾", "gender": "女"}],
+      "aliasUpdates": [],
+      "expected": {
+        "temporaryToId": {"t1": 2},
+        "created": [{"id": 2, "name": "苏禾", "gender": "female"}],
+        "aliases": [{"characterId": 2, "alias": "苏禾", "normalizedAlias": "苏禾"}]
+      }
+    },
+    {
+      "name": "new character matching an existing name reuses it",
+      "existing": [{"id": 1, "name": "林舟", "gender": "male"}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [{"temporaryId": "t1", "displayName": "林舟", "gender": "unknown"}],
+      "aliasUpdates": [],
+      "expected": {
+        "temporaryToId": {"t1": 1},
+        "created": [],
+        "aliases": [{"characterId": 1, "alias": "林舟", "normalizedAlias": "林舟"}]
+      }
+    },
+    {
+      "name": "temporary alias links to existing character",
+      "existing": [{"id": 1, "name": "林舟", "gender": "male"}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [{"temporaryId": "t1", "displayName": "小林", "gender": "unknown"}],
+      "aliasUpdates": [{"characterId": "t1", "stableAliases": ["林舟"]}],
+      "expected": {
+        "temporaryToId": {"t1": 1},
+        "created": [],
+        "aliases": [
+          {"characterId": 1, "alias": "小林", "normalizedAlias": "小林"},
+          {"characterId": 1, "alias": "林舟", "normalizedAlias": "林舟"}
+        ]
+      }
+    },
+    {
+      "name": "one temporary matching two characters is a conflict",
+      "existing": [{"id": 1, "name": "林舟", "gender": ""}, {"id": 2, "name": "苏禾", "gender": ""}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [{"temporaryId": "t1", "displayName": "林舟", "gender": ""}],
+      "aliasUpdates": [{"characterId": "t1", "stableAliases": ["苏禾"]}],
+      "error": true
+    },
+    {
+      "name": "merged alias resolves to the primary character",
+      "existing": [{"id": 1, "name": "林舟", "gender": ""}, {"id": 3, "name": "舟哥", "gender": ""}],
+      "existingAliases": [],
+      "merges": {"3": 1},
+      "newCharacters": [{"temporaryId": "t1", "displayName": "舟哥", "gender": ""}],
+      "aliasUpdates": [],
+      "expected": {
+        "temporaryToId": {"t1": 1},
+        "created": [],
+        "aliases": [{"characterId": 1, "alias": "舟哥", "normalizedAlias": "舟哥"}]
+      }
+    },
+    {
+      "name": "alias update for a formal id keeps the raw spelling",
+      "existing": [{"id": 1, "name": "林舟", "gender": ""}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [],
+      "aliasUpdates": [{"characterId": "1", "stableAliases": [" 阿舟 "]}],
+      "expected": {
+        "temporaryToId": {},
+        "created": [],
+        "aliases": [{"characterId": 1, "alias": "阿舟", "normalizedAlias": "阿舟"}]
+      }
+    },
+    {
+      "name": "rejected title alias fails",
+      "existing": [{"id": 1, "name": "林舟", "gender": ""}],
+      "existingAliases": [],
+      "merges": {},
+      "newCharacters": [],
+      "aliasUpdates": [{"characterId": "1", "stableAliases": ["老师"]}],
+      "error": true
+    }
+  ],
+  "bind": [
+    {"name": "first candidate", "characterId": 1, "existing": {}, "candidates": ["M1", "M2"], "expected": {"voiceAssetId": "M1", "revision": 1}},
+    {"name": "skip voice used by another character", "characterId": 7, "existing": {"5": {"voiceAssetId": "M1", "revision": 1}}, "candidates": ["M1", "M2"], "expected": {"voiceAssetId": "M2", "revision": 1}},
+    {"name": "keep existing binding", "characterId": 7, "existing": {"7": {"voiceAssetId": "M3", "revision": 2}}, "candidates": ["M1"], "expected": {"voiceAssetId": "M3", "revision": 2}},
+    {"name": "skip blank voice id", "characterId": 1, "existing": {}, "candidates": ["", "M2"], "expected": {"voiceAssetId": "M2", "revision": 1}},
+    {"name": "no unused voice", "characterId": 2, "existing": {"1": {"voiceAssetId": "M1", "revision": 1}}, "candidates": ["M1"], "error": true}
+  ],
+  "partition": [
+    {"name": "unit count limit leaves room for context", "lengths": [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10], "expected": [56, 4]},
+    {"name": "text budget leaves room for context", "lengths": [3000, 600], "expected": [1, 1]},
+    {"name": "exactly at the budget stays together", "lengths": [3000, 500], "expected": [2]},
+    {"name": "oversized unit fails", "lengths": [4001], "error": true}
+  ]
+}

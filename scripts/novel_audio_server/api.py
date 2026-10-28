@@ -28,6 +28,13 @@ MAX_TEXT_LENGTH = 1200
 # Measured on the 7B Windows host: about 50 Han characters per request keeps a
 # warm segment near 20 s and a cold one under 30 s.
 DEFAULT_MAX_SEGMENT_CHARS = 50
+# Per-chapter generation paths refused while a whole-book job owns the GPU.
+BOOK_JOB_BLOCKED_PATHS = frozenset({
+    "/v1/runtime/acquire",
+    "/v1/chapter/analyze",
+    "/v1/voices/preview",
+    "/v1/tts/synthesize",
+})
 
 
 class RequestContext:
@@ -209,11 +216,13 @@ class _RequestLease:
 
 
 class NovelAudioApi:
-    def __init__(self, token, backend, catalog, runtime=None):
+    def __init__(self, token, backend, catalog, runtime=None, book_jobs=None):
         self.token = token
         self.backend = backend
         self.catalog = catalog
         self.runtime = runtime
+        # Optional whole-book job handler (scripts/novel-audio-local/book_jobs_api.py).
+        self.book_jobs = book_jobs
         self._closed = False
 
     def authorized(self, authorization):
@@ -232,6 +241,9 @@ class NovelAudioApi:
         if self._closed:
             return
         self._closed = True
+        if self.book_jobs is not None:
+            # Stop the book executor first so it releases its lease cleanly.
+            self.book_jobs.close()
         if self.runtime is not None:
             self.runtime.close()
         close = getattr(self.backend, "close", None)
@@ -266,6 +278,11 @@ class NovelAudioApi:
 
         try:
             context.check()
+            if self.book_jobs is not None:
+                if self.book_jobs.handles(path):
+                    return self.book_jobs.respond(method, path, body)
+                if path in BOOK_JOB_BLOCKED_PATHS and self.book_jobs.busy():
+                    return self.error(429, "book_job_running")
             if method == "GET" and path == "/v1/health":
                 ready = bool(getattr(self.backend, "ready", True))
                 return 200, {"Content-Type": "application/json"}, {

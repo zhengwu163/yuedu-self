@@ -37,6 +37,8 @@ class ServiceBundleTest(unittest.TestCase):
         from package_service import SOURCE_FILES
         self.assertIn("scripts/novel-audio-local/resource_gate.py", SOURCE_FILES)
         self.assertIn("scripts/novel-audio-local/prewarm_http.py", SOURCE_FILES)
+        # agent.py imports the whole-book job modules at startup.
+        self.assertIn("scripts/novel-audio-local/book_jobs_runner.py", SOURCE_FILES)
 
     def test_bundle_only_contains_allowed_source_and_matching_hashes(self):
         from package_service import SOURCE_FILES, build_bundle
