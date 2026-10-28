@@ -206,7 +206,8 @@ class NovelAudioAnalysisCoordinator(
         return result
     }
 
-    private fun partition(units: List<ParsedTextUnit>): List<List<ParsedTextUnit>> {
+    /** internal：与电脑端整本任务共用一致性用例（scripts/novel-audio-local/fixtures/book_jobs_parity.json）。 */
+    internal fun partition(units: List<ParsedTextUnit>): List<List<ParsedTextUnit>> {
         val batches = mutableListOf<MutableList<ParsedTextUnit>>()
         var current = mutableListOf<ParsedTextUnit>()
         var currentLength = 0

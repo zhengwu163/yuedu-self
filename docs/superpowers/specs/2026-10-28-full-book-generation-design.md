@@ -128,8 +128,7 @@
 以后改任一侧逻辑都要同时更新这组用例。手机导入时人物表仍由 Kotlin 代码最终写入，电脑只提出建议。
 
 当前状态：用例在 `scripts/novel-audio-local/fixtures/book_jobs_parity.json`，Python 端由
-`test_book_jobs_analysis.py` 读取并全部通过；Kotlin 端读取同一文件的 JVM 测试随第 2 步手机端一起补上，
-在那之前用例的期望值是按 Kotlin 源码推出来的，尚未由 Kotlin 实际跑过。
+`test_book_jobs_analysis.py` 读取，Kotlin 端由 `NovelAudioBookJobParityTest` 读取同一文件，两侧都全部通过。
 
 ## 7. 读音词典
 
