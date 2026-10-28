@@ -68,6 +68,10 @@ Android（本次，`feat/local-model-service`）：
 
 ## 6. 后续工作（按优先级）
 
+> 2026-10-28 起，速度判定线（RTF ≤ 0.5 才做实时）、整书后台模式与提速路线以
+> [AI_AUDIOBOOK_ROADMAP.md](AI_AUDIOBOOK_ROADMAP.md) 为准。下列第 1–4 项已在 10-10～10-24 完成；
+> 第 5 项已评估，结论是保留「每批后立即卸载」（证据见 `superpowers/plans/2026-10-11-windows-lifecycle-desktop.md`）。
+
 1. 部署与联网：部署本分支最新提交；开放局域网访问（只放行专用网络、只开服务端口）；
    从局域网带令牌自测 health / acquire / 50 字合成 / release。
 2. 手机端阻断项：核实并移植第 5 节前四项；构建 debug 包装到手机（覆盖安装，不清数据），

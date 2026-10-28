@@ -243,6 +243,7 @@ git_log.txt
 !/docs/NOVEL_AUDIO_SERVER_API_V1.md
 !/docs/AI_AUDIOBOOK_ANDROID_DELIVERY_RULES.md
 !/docs/AI_AUDIOBOOK_WINDOWS_TAKEOVER.md
+!/docs/AI_AUDIOBOOK_ROADMAP.md
 !/docs/project-rules/
 /docs/project-rules/*
 !/docs/project-rules/database-migration-safety.md
