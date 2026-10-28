@@ -697,6 +697,10 @@
             android:name=".service.CheckRssSourceService"
             android:foregroundServiceType="dataSync" />
         <service
+            android:name=".service.NovelAudioBookJobService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <service
             android:name=".service.TtsPrebuildService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />

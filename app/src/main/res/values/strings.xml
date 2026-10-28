@@ -3032,6 +3032,10 @@ Selected text or question:
     <string name="tts_casting_list_title">选择多人听书模板</string>
     <string name="tts_casting_active_source_book">实际生效=本书覆盖</string>
     <string name="tts_casting_prebuild_menu">批量预合成</string>
+    <string name="novel_audio_book_job_title">整本生成</string>
+    <string name="novel_audio_book_job_uploading_start">正在准备上传正文到家里的电脑</string>
+    <string name="novel_audio_book_job_uploading">正在上传正文：%1$d / %2$d 章</string>
+    <string name="novel_audio_book_job_waiting_wifi">等待连接家里的 Wi‑Fi 后继续上传</string>
     <string name="tts_casting_prebuild_start">开始预合成</string>
     <string name="tts_casting_prebuild_scanning">统计中…</string>
     <string name="tts_casting_prebuild_flow_hint">按章节范围后台合成音频，播放时命中缓存零等待；将消耗网络流量</string>
