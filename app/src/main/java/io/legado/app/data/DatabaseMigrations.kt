@@ -26,7 +26,8 @@ object DatabaseMigrations {
             migration_97_98, migration_98_99, migration_99_100, migration_100_101,
             migration_101_102, migration_102_103, migration_103_104, migration_104_105,
             migration_105_106, migration_106_107, migration_107_108, migration_108_109,
-            migration_109_110, migration_110_111, migration_111_112, migration_112_113
+            migration_109_110, migration_110_111, migration_111_112, migration_112_113,
+            migration_113_114
         )
     }
 
@@ -1667,6 +1668,43 @@ object DatabaseMigrations {
                     "ADD COLUMN `executionAttempt` INTEGER NOT NULL DEFAULT 0"
             )
             AppLog.put("AppDatabase Migration 112→113: NovelAudio 执行尝试号字段添加完成")
+        }
+    }
+
+    val migration_113_114 = object : Migration(113, 114) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `novel_audio_book_jobs` (" +
+                    "`jobId` TEXT NOT NULL DEFAULT '', `serverScope` TEXT NOT NULL DEFAULT '', " +
+                    "`workKey` TEXT NOT NULL DEFAULT '', `physicalBookUrl` TEXT NOT NULL DEFAULT '', " +
+                    "`title` TEXT NOT NULL DEFAULT '', `state` TEXT NOT NULL DEFAULT 'UPLOADING', " +
+                    "`maxSegmentChars` INTEGER NOT NULL DEFAULT 0, `chapterCount` INTEGER NOT NULL DEFAULT 0, " +
+                    "`stateReason` TEXT NOT NULL DEFAULT '', `lastSyncAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "`createdAt` INTEGER NOT NULL DEFAULT 0, `updatedAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY(`jobId`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_book_jobs_physicalBookUrl` " +
+                    "ON `novel_audio_book_jobs` (`physicalBookUrl`)"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_book_jobs_state` " +
+                    "ON `novel_audio_book_jobs` (`state`)"
+            )
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `novel_audio_book_job_chapters` (" +
+                    "`jobId` TEXT NOT NULL DEFAULT '', `chapterIndex` INTEGER NOT NULL DEFAULT 0, " +
+                    "`chapterId` TEXT NOT NULL DEFAULT '', `position` INTEGER NOT NULL DEFAULT 0, " +
+                    "`snapshotHash` TEXT NOT NULL DEFAULT '', `uploadState` TEXT NOT NULL DEFAULT 'PENDING', " +
+                    "`importState` TEXT NOT NULL DEFAULT 'NONE', `planId` TEXT NOT NULL DEFAULT '', " +
+                    "`failure` TEXT NOT NULL DEFAULT '', `updatedAt` INTEGER NOT NULL DEFAULT 0, " +
+                    "PRIMARY KEY(`jobId`, `chapterIndex`))"
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_novel_audio_book_job_chapters_jobId_position` " +
+                    "ON `novel_audio_book_job_chapters` (`jobId`, `position`)"
+            )
+            AppLog.put("AppDatabase Migration 113→114: NovelAudio 整本生成任务表添加完成")
         }
     }
 

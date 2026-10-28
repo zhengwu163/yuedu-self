@@ -7,6 +7,11 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.legado.app.data.AppDatabase
 import io.legado.app.data.DatabaseMigrations
+import io.legado.app.data.entities.NovelAudioBookJobChapterEntity
+import io.legado.app.data.entities.NovelAudioBookJobEntity
+import io.legado.app.data.entities.NovelAudioBookJobImportStates
+import io.legado.app.data.entities.NovelAudioBookJobStates
+import io.legado.app.data.entities.NovelAudioBookJobUploadStates
 import io.legado.app.data.entities.NovelAudioChapterPlanEntity
 import io.legado.app.data.entities.NovelAudioDownloadTaskEntity
 import io.legado.app.data.entities.NovelAudioRetention
@@ -409,6 +414,51 @@ class NovelAudioMigrationTest {
         assertEquals("NETWORK_REQUIRED", task.stateReason)
         assertEquals(NovelAudioRetention.PINNED, plan.retention)
         assertEquals(NovelAudioRetention.PINNED, task.retention)
+        closeDatabase(database, name)
+    }
+
+    @Test
+    fun migration113To114AddsEmptyBookJobTablesWithoutTouchingPlans() {
+        val name = "$databaseName-book-jobs"
+        databaseNames += name
+        helper.createDatabase(name, 113).use { legacy ->
+            legacy.execSQL(
+                """
+                INSERT INTO novel_audio_chapter_plans (
+                    planId, workKey, physicalBookUrl, chapterIndex, chapterUrl, scope,
+                    generation, state, stateReason, retention, snapshotHash, rulesVersion,
+                    planJson, progress, executionAttempt, createdAt, updatedAt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+                arrayOf<Any>(
+                    "plan-before-book-jobs", "work", "book://jobs", 1, "chapter://1", "scope",
+                    3L, NovelAudioStates.READY, "", NovelAudioRetention.PINNED, "snapshot",
+                    "rules", "{}", 100, 2L, 11L, 12L
+                )
+            )
+        }
+        helper.runMigrationsAndValidate(name, 114, true, DatabaseMigrations.migration_113_114).close()
+        val database = Room.databaseBuilder(
+            InstrumentationRegistry.getInstrumentation().targetContext,
+            AppDatabase::class.java,
+            name
+        ).addMigrations(*DatabaseMigrations.migrations)
+            .allowMainThreadQueries()
+            .build()
+        openDatabases[name] = database
+        assertEquals(NovelAudioStates.READY,
+            checkNotNull(database.novelAudioDao.chapterPlan("plan-before-book-jobs")).state)
+        val dao = database.novelAudioBookJobDao
+        assertEquals(emptyList<NovelAudioBookJobEntity>(),
+            dao.jobsInStates(NovelAudioBookJobStates.ACTIVE))
+        dao.createJob(
+            NovelAudioBookJobEntity(jobId = "job-1", physicalBookUrl = "book://jobs"),
+            listOf(NovelAudioBookJobChapterEntity(jobId = "job-1", chapterIndex = 4, chapterId = "c4"))
+        )
+        val chapter = checkNotNull(dao.chapter("job-1", 4))
+        assertEquals(NovelAudioBookJobUploadStates.PENDING, chapter.uploadState)
+        assertEquals(NovelAudioBookJobImportStates.NONE, chapter.importState)
+        assertEquals("job-1", dao.activeJobForBook("book://jobs", NovelAudioBookJobStates.ACTIVE)?.jobId)
         closeDatabase(database, name)
     }
 

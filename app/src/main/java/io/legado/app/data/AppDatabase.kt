@@ -48,6 +48,7 @@ import io.legado.app.data.dao.SearchBookDao
 import io.legado.app.data.dao.SearchKeywordDao
 import io.legado.app.data.dao.SourceGroupCoverDao
 import io.legado.app.data.dao.DownloadTaskDao
+import io.legado.app.data.dao.NovelAudioBookJobDao
 import io.legado.app.data.dao.NovelAudioDao
 import io.legado.app.data.dao.ServerDao
 import io.legado.app.data.dao.TxtTocRuleDao
@@ -83,6 +84,8 @@ import io.legado.app.data.entities.CoverGalleryImage
 import io.legado.app.data.entities.DictRule
 import io.legado.app.data.entities.DownloadTaskEntity
 import io.legado.app.data.entities.NovelAudioAliasEntity
+import io.legado.app.data.entities.NovelAudioBookJobChapterEntity
+import io.legado.app.data.entities.NovelAudioBookJobEntity
 import io.legado.app.data.entities.NovelAudioChapterPlanEntity
 import io.legado.app.data.entities.NovelAudioDownloadTaskEntity
 import io.legado.app.data.entities.NovelAudioMergeRecordEntity
@@ -132,7 +135,7 @@ val appDb by lazy {
 }
 
 @Database(
-    version = 113,
+    version = 114,
     exportSchema = true,
     entities = [Book::class, BookGroup::class, BookSource::class, BookChapter::class,
         ReplaceRule::class, SearchBook::class, SearchKeyword::class, Cookie::class,
@@ -156,7 +159,8 @@ val appDb by lazy {
         DownloadTaskEntity::class,
         NovelAudioAliasEntity::class, NovelAudioVoiceBindingEntity::class,
         NovelAudioChapterPlanEntity::class, NovelAudioSegmentArtifactEntity::class,
-        NovelAudioDownloadTaskEntity::class, NovelAudioMergeRecordEntity::class],
+        NovelAudioDownloadTaskEntity::class, NovelAudioMergeRecordEntity::class,
+        NovelAudioBookJobEntity::class, NovelAudioBookJobChapterEntity::class],
     views = [BookSourcePart::class],
     autoMigrations = [
         AutoMigration(from = 43, to = 44),
@@ -274,6 +278,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract val aiMemoryDao: AiMemoryDao
     abstract val downloadTaskDao: DownloadTaskDao
     abstract val novelAudioDao: NovelAudioDao
+    abstract val novelAudioBookJobDao: NovelAudioBookJobDao
 
     companion object {
 
