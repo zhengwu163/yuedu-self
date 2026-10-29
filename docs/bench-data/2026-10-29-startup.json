@@ -1,0 +1,80 @@
+[
+  {
+    "run": "qwen-batch4",
+    "initialization_s": 5.355321100010769,
+    "cold_first_audio_s": 10.004277100000763,
+    "cold_gpu_peak_mib": 7828.5625,
+    "warmup_s": 4.892617899997276,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "4.57.3",
+      "qwen-tts": "0.1.1"
+    }
+  },
+  {
+    "run": "qwen-batch8",
+    "initialization_s": 19.93191559999832,
+    "cold_first_audio_s": 24.78050660000008,
+    "cold_gpu_peak_mib": 7829.125,
+    "warmup_s": 5.840638900001068,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "4.57.3",
+      "qwen-tts": "0.1.1"
+    }
+  },
+  {
+    "run": "qwen-graphs50",
+    "initialization_s": 19.236122999995132,
+    "cold_first_audio_s": 21.0649623000063,
+    "cold_gpu_peak_mib": 8309.75,
+    "warmup_s": 0.712672499998007,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "5.15.1",
+      "qwen-tts-hf": "0.1.1.post1",
+      "faster-qwen3-tts": "0.5.4"
+    }
+  },
+  {
+    "run": "qwen-graphs-long300",
+    "initialization_s": 5.317760200006887,
+    "cold_first_audio_s": 7.1570093000045745,
+    "cold_gpu_peak_mib": 8318.890625,
+    "warmup_s": 0.7340454000077443,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "5.15.1",
+      "qwen-tts-hf": "0.1.1.post1",
+      "faster-qwen3-tts": "0.5.4"
+    }
+  },
+  {
+    "run": "vs-omni-roles-v2",
+    "initialization_s": 0.08184230000188109,
+    "cold_first_audio_s": 7.109509599991725,
+    "cold_gpu_peak_mib": 5778.50390625,
+    "warmup_s": 1.9771509999991395,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "5.15.1",
+      "qwen-tts": "0.1.1",
+      "omnivoice": "0.5.7",
+      "voxcpm": "2.0.3"
+    }
+  },
+  {
+    "run": "vs-vox-roles",
+    "initialization_s": 0.008112199997412972,
+    "cold_first_audio_s": 18.717576399998507,
+    "cold_gpu_peak_mib": 9874.9375,
+    "warmup_s": 11.826110099995276,
+    "versions": {
+      "torch": "2.9.1+cu130",
+      "transformers": "5.15.1",
+      "qwen-tts": "0.1.1",
+      "omnivoice": "0.5.7",
+      "voxcpm": "2.0.3"
+    }
+  }
+]
