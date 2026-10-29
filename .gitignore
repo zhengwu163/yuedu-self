@@ -295,3 +295,6 @@ git_log.txt
 /novel-audio.local.connection.json*
 /novel-audio.local.smoke/
 /scripts/novel-audio-local/state/
+
+# Private benchmark audio, machine configuration, raw runs and listening reviews.
+/bench-output/
