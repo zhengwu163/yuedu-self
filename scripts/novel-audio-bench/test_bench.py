@@ -51,6 +51,15 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn(b'invalid choice', result.stderr)
 
+    def test_long_checks_are_verbatim_from_the_original_chapters(self):
+        fixtures = Path(__file__).parent / 'fixtures'
+        for number in (1, 2, 3):
+            excerpt = (fixtures / f'long{number:02d}.txt').read_text(encoding='utf-8').strip()
+            chapter = (fixtures / f'ch{number:02d}.txt').read_text(encoding='utf-8')
+            self.assertIn(excerpt, chapter)
+            self.assertGreater(len(excerpt), 50)
+            self.assertLessEqual(len(excerpt), 300)
+
 
 if __name__ == '__main__':
     unittest.main()
